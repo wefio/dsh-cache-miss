@@ -1,0 +1,8 @@
+# dsh-cache-miss bundle patch.
+# Inserted into the profile composition when installed via
+#   dsh plugin --profile web add link:<this-package-path>
+# The plugin row resolves the package by name through the profile's node_modules;
+# the browser half registers the cache-miss conversation node via conversationEvents.
+- insert:
+    - id: cache-miss
+      name: 'dsh-cache-miss'
