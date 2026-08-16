@@ -48,9 +48,9 @@ describe('cacheMissDefinition.start / update', () => {
     return { state: cacheMissDefinition.start!({} as any, { event: stepStart(turn, step) } as any) }
   }
 
-  it('opens with empty boundaries and no usage', () => {
+  it('opens with no usage but records the step start time', () => {
     expect(cacheMissDefinition.start!({} as any, { event: stepStart(4, 2) } as any)).toEqual({
-      turn: 4, step: 2, usage: undefined, stepStartTime: null, firstTokenTime: null, missTime: null,
+      turn: 4, step: 2, usage: undefined, stepStartTime: 1000, firstTokenTime: null, missTime: null,
     })
   })
 

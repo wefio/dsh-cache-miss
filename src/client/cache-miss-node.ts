@@ -95,7 +95,7 @@ export const cacheMissDefinition: ConversationNodeDefinition<CacheMissState> = {
   start: (_context, match) => {
     if (match.event.type !== 'step/start') throw new Error('cache-miss start requires step/start')
     const { turn, step } = match.event.data as { turn: number; step: number }
-    return emptyState(turn, step)
+    return { ...emptyState(turn, step), stepStartTime: match.event.time }
   },
   update: (context, match) => {
     const event = match.event
