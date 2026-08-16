@@ -1,0 +1,11 @@
+# Normalize line endings to LF across platforms.
+* text=auto eol=lf
+
+# Explicit text types.
+*.ts text eol=lf
+*.tsx text eol=lf
+*.js text eol=lf
+*.json text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.md text eol=lf

@@ -1,8 +1,8 @@
 # dsh-cache-miss
 
-DSH web plugin: a yellow one-line prompt-cache-miss notice under the **first
-assistant reply of each turn**, when that turn's first request rebuilt the
-prompt cache.
+DSH web plugin: a yellow one-line prompt-cache-miss notice under an assistant
+reply whose request rebuilt the prompt cache — shown the moment the miss is
+detected from the stream's usage, usually the turn's first request.
 
 ## What it does
 
@@ -13,17 +13,19 @@ turn usually hit the just-rebuilt cache. DSH's own token/cache stats sit under
 the composer and the produced-files row sits at the turn tail, neither of which
 indicates a miss where it actually happens.
 
-This plugin renders, under the turn's first assistant reply, a single yellow
-line only when that request was a cache miss:
+This plugin renders, under each assistant reply whose request missed, a single
+yellow line, live, as soon as that step's `usage` chunk arrives:
 
 ```
 Cache miss after 3m idle: 182k tokens re-billed · ttft 2.1s ↑
 ```
 
 - `idle` — gap from the previous turn's end to this one's start.
-- `re-billed` — the request's input tokens (abbreviated to k).
-- `ttft` — first-token latency (abbreviation of the assistant timing), when
-  available; the up arrow hints a rebuild prefill usually ran slower.
+- `re-billed` — the request's uncached input tokens (abbreviated to k).
+- `cached` — the cached-read portion of the same prefill (when the provider
+  reports it), so the rebilled-vs-cached split stays unambiguous.
+- `ttft` — first-token latency, when available; the up arrow hints a rebuild
+  prefill usually ran slower.
 
 It is pure presentation: nothing is written to the session log, no DSH source
 is modified, and it does not take the turn-tail chain, so it does not collide
@@ -31,9 +33,25 @@ with the produced-files row (e.g. `DSH-better-sidebar`).
 
 ## Miss definition
 
-A request is a miss when `inputTokens > 0` and `cacheReadTokens` is not a
-positive number. A provider that reports no cache fields is therefore treated
-as a miss, because no input hit the cache.
+`inputTokens` is the disjoint "uncached input only" count and `cacheReadTokens`
+the cached part of the same prefill, so the cache-hit ratio is
+`hitRatio = cacheReadTokens / (inputTokens + cacheReadTokens)`. A request is a
+miss when, all together:
+
+- `inputTokens > 0`,
+- `hitRatio < 80%` (over 20% of the prefill was uncached — significant because
+  context accumulates), and
+- `inputTokens >= 1000` (at least 1k tokens actually re-billed).
+
+A provider that reports no cache fields counts as a 0% hit ratio. A normal
+continuation reusing the just-built cache therefore stays quiet (hit ratio
+≥ 80%), and `re-billed` shows only the uncached `inputTokens`.
+
+The miss is read from the stream's own `usage` chunk — adapters emit it before
+the terminal finish — so the notice appears as soon as the usage lands (while
+the reply is still streaming), not only once the assistant message settles.
+The line is logged to the browser console once per step, stamped in the
+browser's local time zone.
 
 ## Install
 
@@ -49,8 +67,9 @@ Restart `dsh web` (or hard-refresh the running GUI) to load the client bundle.
 
 ## Known limitations
 
-- TTFT is currently omitted (rendered as if absent) because reading the exact
-  assistant timing from the turn data is not yet wired; the line then reads
-  `... tokens re-billed` without the `· ttft ...` segment.
-- The node publishes for the first assistant of every turn, but renders nothing
-  for cache hits, so a hit turn contributes no visible row.
+- TTFT is the wall-clock gap between the step's `step/start` event and its
+  first non-empty token delta, computed from session event times. It is absent
+  (rendered as if no timing) when a boundary fell outside the loaded window.
+- The node publishes for every assistant step, but renders nothing for cache
+  hits, so a hit turn contributes no visible row. Each step logs at most one
+  console line regardless of how many renders follow.

@@ -1,20 +1,37 @@
 import { describe, expect, it } from 'vitest'
-import { formatLine, getLineStatus, isCacheMiss, type CacheUsage } from '../src/client/logic'
+import { formatLine, formatLocalTime, getLineStatus, isCacheMiss, ttftMs, type CacheUsage } from '../src/client/logic'
 
 describe('isCacheMiss', () => {
-  it('is false when cacheReadTokens > 0', () => {
-    const usage: CacheUsage = { inputTokens: 182000, cacheReadTokens: 120000 }
+  it('is false when a large cached read dominates a small uncached input', () => {
+    const usage: CacheUsage = { inputTokens: 182, cacheReadTokens: 120000 }
     expect(isCacheMiss(usage)).toBe(false)
   })
 
-  it('is true when cacheReadTokens is 0 and inputTokens > 0', () => {
+  it('is true when uncached input dominates with a low hit ratio (rebuild)', () => {
+    const usage: CacheUsage = { inputTokens: 102056, cacheReadTokens: 37120 }
+    // hitRatio = 37120 / (102056 + 37120) ≈ 26.7% < 80%
+    expect(isCacheMiss(usage)).toBe(true)
+  })
+
+  it('is true when cacheReadTokens is 0 and inputTokens >= 1000', () => {
     const usage: CacheUsage = { inputTokens: 182000, cacheReadTokens: 0 }
     expect(isCacheMiss(usage)).toBe(true)
   })
 
-  it('is true when cacheReadTokens is missing and inputTokens > 0', () => {
+  it('is true when cacheReadTokens is missing and inputTokens >= 1000', () => {
     const usage: CacheUsage = { inputTokens: 182000 }
     expect(isCacheMiss(usage)).toBe(true)
+  })
+
+  it('is false when uncached input is below the 1k floor even at 0% hit ratio', () => {
+    const usage: CacheUsage = { inputTokens: 999 }
+    expect(isCacheMiss(usage)).toBe(false)
+  })
+
+  it('is false when hit ratio is >= 80% despite a large uncached input', () => {
+    const usage: CacheUsage = { inputTokens: 20000, cacheReadTokens: 180000 }
+    // hitRatio = 90% >= 80%
+    expect(isCacheMiss(usage)).toBe(false)
   })
 
   it('is false when inputTokens is 0', () => {
@@ -29,45 +46,101 @@ describe('isCacheMiss', () => {
 
 describe('formatLine', () => {
   it('formats the canonical line', () => {
-    const line = formatLine({ idleMs: 3 * 60_000, rebilledTokens: 182_000, ttftMs: 2_100 })
+    const line = formatLine({ idleMs: 3 * 60_000, rebilledTokens: 182_000, cacheReadTokens: undefined, ttftMs: 2_100 })
     expect(line).toBe('Cache miss after 3m idle: 182k tokens re-billed · ttft 2.1s ↑')
   })
 
   it('shows seconds below one minute', () => {
-    expect(formatLine({ idleMs: 45_000, rebilledTokens: 20_000, ttftMs: 900 }))
+    expect(formatLine({ idleMs: 45_000, rebilledTokens: 20_000, cacheReadTokens: undefined, ttftMs: 900 }))
       .toBe('Cache miss after 45s idle: 20k tokens re-billed · ttft 0.9s ↑')
   })
 
   it('rounds minutes upward when >= 60s', () => {
-    expect(formatLine({ idleMs: 60_000, rebilledTokens: 100_000, ttftMs: 500 }))
+    expect(formatLine({ idleMs: 60_000, rebilledTokens: 100_000, cacheReadTokens: undefined, ttftMs: 500 }))
       .toBe('Cache miss after 1m idle: 100k tokens re-billed · ttft 0.5s ↑')
   })
 
   it('omits ttft arrow when ttft is absent', () => {
-    expect(formatLine({ idleMs: 0, rebilledTokens: 1000, ttftMs: 0 }))
+    expect(formatLine({ idleMs: 0, rebilledTokens: 1000, cacheReadTokens: undefined, ttftMs: 0 }))
       .toBe('Cache miss after 0s idle: 1k tokens re-billed')
   })
 
+  it('appends the cached-read portion when reported', () => {
+    expect(formatLine({ idleMs: 0, rebilledTokens: 180_655, cacheReadTokens: 768, ttftMs: 0 }))
+      .toBe('Cache miss after 0s idle: 181k tokens re-billed · 1k cached')
+  })
+
   it('formats small token counts without decimal drift', () => {
-    expect(formatLine({ idleMs: 0, rebilledTokens: 999, ttftMs: 0 }))
+    expect(formatLine({ idleMs: 0, rebilledTokens: 999, cacheReadTokens: undefined, ttftMs: 0 }))
       .toBe('Cache miss after 0s idle: 1k tokens re-billed')
   })
 })
 
 describe('getLineStatus', () => {
   it('returns a line status for a miss', () => {
-    const s = getLineStatus({ usage: { inputTokens: 10_000 }, idleMs: 90_000, ttftMs: 1200 })
+    const s = getLineStatus({ usage: { inputTokens: 10_000 }, idleMs: 90_000, ttftMs: 1200, hasPriorTurn: true })
     expect(s.kind).toBe('show')
     expect(s.line).toBe('Cache miss after 1m idle: 10k tokens re-billed · ttft 1.2s ↑')
   })
 
   it('returns hidden for a hit', () => {
-    const s = getLineStatus({ usage: { inputTokens: 10_000, cacheReadTokens: 5000 }, idleMs: 0, ttftMs: 0 })
+    const s = getLineStatus({ usage: { inputTokens: 79, cacheReadTokens: 152064 }, idleMs: 0, ttftMs: 0, hasPriorTurn: true })
     expect(s.kind).toBe('hidden')
   })
 
   it('returns hidden when there is no usage', () => {
-    const s = getLineStatus({ usage: undefined, idleMs: 0, ttftMs: 0 })
+    const s = getLineStatus({ usage: undefined, idleMs: 0, ttftMs: 0, hasPriorTurn: true })
     expect(s.kind).toBe('hidden')
+  })
+
+  it('counts only uncached input in the re-billed total', () => {
+    const s = getLineStatus({
+      usage: { inputTokens: 10_000, cacheReadTokens: 0, cacheWriteTokens: 5_000 },
+      idleMs: 0,
+      ttftMs: 0,
+      hasPriorTurn: true,
+    })
+    expect(s.kind).toBe('show')
+    expect(s.line).toBe('Cache miss after 0s idle: 10k tokens re-billed · 0k cached')
+  })
+
+  it('shows the cached-read portion beside the re-billed total', () => {
+    const s = getLineStatus({
+      usage: { inputTokens: 180_655, cacheReadTokens: 768 },
+      idleMs: 60_000,
+      ttftMs: 0,
+      hasPriorTurn: true,
+    })
+    expect(s.kind).toBe('show')
+    expect(s.line).toBe('Cache miss after 1m idle: 181k tokens re-billed · 1k cached')
+  })
+
+  it('returns hidden for a cold-start first turn (no prior turn)', () => {
+    const s = getLineStatus({ usage: { inputTokens: 10_000 }, idleMs: 0, ttftMs: 0, hasPriorTurn: false })
+    expect(s.kind).toBe('hidden')
+  })
+})
+
+describe('ttftMs', () => {
+  it('computes first-token latency from step boundaries', () => {
+    expect(ttftMs(1000, 3100)).toBe(2100)
+  })
+
+  it('returns 0 when either boundary is missing', () => {
+    expect(ttftMs(null, 3100)).toBe(0)
+    expect(ttftMs(1000, null)).toBe(0)
+    expect(ttftMs(undefined, undefined)).toBe(0)
+  })
+
+  it('returns 0 for a non-positive interval', () => {
+    expect(ttftMs(3100, 1000)).toBe(0)
+  })
+})
+
+describe('formatLocalTime', () => {
+  it('formats in the local time zone', () => {
+    const date = new Date(2026, 7, 15, 18, 30, 5) // Aug 15 2026 18:30:05 local
+    const formatted = formatLocalTime(date.getTime())
+    expect(formatted).toBe(date.toLocaleString())
   })
 })

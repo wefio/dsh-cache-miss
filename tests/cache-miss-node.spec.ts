@@ -1,63 +1,114 @@
 import { describe, expect, it } from 'vitest'
 import { cacheMissDefinition } from '../src/client/cache-miss-node'
 
-/** Minimal append-surface assistant/message event shape the Definition reads. */
-function assistantMessage(turn: number, step: number, usage: unknown): any {
+/** Minimal step/start event opening one turn:step. */
+function stepStart(turn: number, step: number): any {
+  return { type: 'step/start', seq: 1, time: 1000, data: { turn, step } }
+}
+
+/** Minimal assistant/chunk event for one turn:step. */
+function chunk(turn: number, step: number, seq: number, time: number, chunkType: string, payload: unknown): any {
+  return { type: 'assistant/chunk', seq, time, data: { turn, step, chunk: { type: chunkType, ...payload } } }
+}
+
+/** Minimal finalized assistant message for one turn:step. */
+function assistantMessage(turn: number, step: number, seq: number, time: number, usage: unknown): any {
   return {
     type: 'assistant/message',
-    seq: step,
-    time: 1000,
+    seq,
+    time,
     data: { turn, step, message: { content: [], id: 'm' }, usage },
   }
 }
 
-function contextState(turn: number, step: number, usage: unknown): any {
-  return { turn, step, usage }
-}
-
 describe('cacheMissDefinition.match', () => {
-  it('claims the first assistant of a turn (step 0) with role start', () => {
-    expect(cacheMissDefinition.match(assistantMessage(3, 0, { inputTokens: 100 }))).toEqual({
-      id: '3:0',
-      role: 'start',
-    })
+  it('starts a context on step/start, keyed by turn:step', () => {
+    expect(cacheMissDefinition.match(stepStart(3, 1))).toEqual({ id: '3:1', role: 'start' })
   })
 
-  it('ignores non-first assistant steps of a turn', () => {
-    expect(cacheMissDefinition.match(assistantMessage(3, 1, { inputTokens: 50 }))).toBeNull()
-    expect(cacheMissDefinition.match(assistantMessage(3, 2, { inputTokens: 20 }))).toBeNull()
+  it('updates on helper chunks and the finalized message', () => {
+    expect(cacheMissDefinition.match(chunk(3, 1, 2, 1200, 'text-delta', { text: 'x' }))).toEqual({ id: '3:1', role: 'update' })
+    expect(cacheMissDefinition.match(chunk(3, 1, 3, 1300, 'usage', { usage: { inputTokens: 100 } }))).toEqual({ id: '3:1', role: 'update' })
+    expect(cacheMissDefinition.match(assistantMessage(3, 1, 4, 1400, { inputTokens: 100 }))).toEqual({ id: '3:1', role: 'update' })
   })
 
-  it('ignores non assistant/message events', () => {
+  it('uses distinct ids for distinct steps of the same turn', () => {
+    expect(cacheMissDefinition.match(stepStart(3, 1))).toEqual({ id: '3:1', role: 'start' })
+    expect(cacheMissDefinition.match(stepStart(3, 2))).toEqual({ id: '3:2', role: 'start' })
+  })
+
+  it('ignores unrelated events', () => {
     expect(cacheMissDefinition.match({ type: 'tool/result', data: {}, seq: 0 })).toBeNull()
+    expect(cacheMissDefinition.match({ type: 'turn/start', data: { turn: 1 }, seq: 0 })).toBeNull()
   })
 })
 
-describe('cacheMissDefinition.start', () => {
-  it('captures usage from the first assistant', () => {
-    const state = cacheMissDefinition.start!(
-      contextState(1, 0, null),
-      { event: assistantMessage(1, 0, { inputTokens: 9000 }) } as any,
-    )
-    expect(state).toEqual({ turn: 1, step: 0, usage: { inputTokens: 9000 } })
+describe('cacheMissDefinition.start / update', () => {
+  function contextWith(turn: number, step: number): any {
+    return { state: cacheMissDefinition.start!({} as any, { event: stepStart(turn, step) } as any) }
+  }
+
+  it('opens with empty boundaries and no usage', () => {
+    expect(cacheMissDefinition.start!({} as any, { event: stepStart(4, 2) } as any)).toEqual({
+      turn: 4, step: 2, usage: undefined, stepStartTime: null, firstTokenTime: null, missTime: null,
+    })
+  })
+
+  it('captures the first non-empty delta as first-token time', () => {
+    const ctx = contextWith(4, 2)
+    const after = cacheMissDefinition.update!(ctx as any, { event: chunk(4, 2, 2, 1500, 'text-delta', { text: 'hi' }) } as any)
+    expect(after.firstTokenTime).toBe(1500)
+  })
+
+  it('ignores empty deltas for the first-token boundary', () => {
+    const ctx = contextWith(4, 2)
+    const after = cacheMissDefinition.update!(ctx as any, { event: chunk(4, 2, 2, 1500, 'text-delta', { text: '' }) } as any)
+    expect(after.firstTokenTime).toBeNull()
+  })
+
+  it('captures usage and its event time from the usage chunk', () => {
+    const ctx = contextWith(4, 2)
+    const after = cacheMissDefinition.update!(ctx as any, { event: chunk(4, 2, 3, 2000, 'usage', { usage: { inputTokens: 9000 } }) } as any)
+    expect(after.usage).toEqual({ inputTokens: 9000 })
+    expect(after.missTime).toBe(2000)
+  })
+
+  it('fills a missing usage from the finalized message without losing timing', () => {
+    const ctx: any = { state: { turn: 4, step: 2, usage: undefined, stepStartTime: 1000, firstTokenTime: 1200, missTime: null } }
+    const after = cacheMissDefinition.update!(ctx, { event: assistantMessage(4, 2, 9, 3000, { inputTokens: 42 }) } as any)
+    expect(after.usage).toEqual({ inputTokens: 42 })
+    expect(after.missTime).toBe(3000)
+    expect(after.firstTokenTime).toBe(1200)
   })
 })
 
 describe('cacheMissDefinition.buildViewNode', () => {
-  it('publishes a cache-miss node when usage is a miss', () => {
-    const event = assistantMessage(1, 0, { inputTokens: 9000 })
-    const state = contextState(1, 0, { inputTokens: 9000 })
-    const context = {
-      state,
-      key: 'k',
-      id: '1:0',
-      target: 'chat',
-      matches: [{ event }],
-    } as any
-    const node = cacheMissDefinition.buildViewNode!(context)
+  it('publishes a node as soon as the usage chunk reports a miss', () => {
+    const node = cacheMissDefinition.buildViewNode!({
+      key: 'k', id: '1:1', kind: 'cache-miss', target: 'chat',
+      state: { turn: 1, step: 1, usage: { inputTokens: 9000 }, stepStartTime: 1000, firstTokenTime: 1200, missTime: 2000 },
+      start: { event: stepStart(1, 1), role: 'start', location: { kind: 'turn', turn: {} } },
+      matches: [{ event: chunk(1, 1, 2, 2000, 'usage', { usage: { inputTokens: 9000 } }) }],
+    } as any)
     expect(node).not.toBeNull()
     expect(node!.kind).toBe('cache-miss')
-    expect(node!.data.usage).toEqual({ inputTokens: 9000 })
+    expect(node!.data).toEqual({
+      turn: 1, step: 1, usage: { inputTokens: 9000 }, stepStartTime: 1000, firstTokenTime: 1200, missTime: 2000,
+    })
+  })
+
+  it('publishes no node on a cache hit', () => {
+    expect(cacheMissDefinition.buildViewNode!({
+      state: { turn: 1, step: 1, usage: { inputTokens: 9000, cacheReadTokens: 121000 }, stepStartTime: 1000, firstTokenTime: 1200, missTime: 2000 },
+      key: 'k', id: '1:1', target: 'chat', matches: [],
+    } as any)).toBeNull()
+  })
+
+  it('publishes no node without usage', () => {
+    expect(cacheMissDefinition.buildViewNode!({
+      state: { turn: 1, step: 1, usage: undefined, stepStartTime: null, firstTokenTime: null, missTime: null },
+      key: 'k', id: '1:1', target: 'chat', matches: [],
+    } as any)).toBeNull()
   })
 
   it('publishes no node without state', () => {
