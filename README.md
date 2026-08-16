@@ -1,75 +1,47 @@
 # dsh-cache-miss
 
-DSH web plugin: a yellow one-line prompt-cache-miss notice under an assistant
-reply whose request rebuilt the prompt cache — shown the moment the miss is
-detected from the stream's usage, usually the turn's first request.
+[English](README.en.md)
 
-## What it does
+DSH 网页插件：在一轮的**第一条 assistant 回复**正下方，以一条黄色单行提示该轮首次请求的提示缓存未命中（prompt cache miss）。
 
-An agent turn runs `assistant -> tool -> assistant -> tool ...`. The turn's
-**first** model call is the moment the provider's prompt cache may have
-expired and needs a full re-prefill (cache rebuild); later calls in the same
-turn usually hit the just-rebuilt cache. DSH's own token/cache stats sit under
-the composer and the produced-files row sits at the turn tail, neither of which
-indicates a miss where it actually happens.
+## 功能
 
-This plugin renders, under each assistant reply whose request missed, a single
-yellow line, live, as soon as that step's `usage` chunk arrives:
+一轮 Agent 对话是 `assistant -> tool -> assistant -> tool ...`。该轮**第一次**模型调用正是供应商提示缓存可能已过期、需要整段重新 prefill（重建缓存）的时机；同轮后续调用往往命中刚重建的缓存。DSH 自带的 token/缓存统计在输入框下方，产物文件行在轮尾，都无法在 miss 真正发生的位置就地提示。
+
+本插件在轮首第一条 assistant 回复正下方，仅当该请求确为缓存未命中时渲染一条黄色单行：
 
 ```
-Cache miss after 3m idle: 182k tokens re-billed · ttft 2.1s ↑
+Cache miss after 3m idle: 182k tokens re-billed · 0.8k cached · ttft 2.1s ↑
 ```
 
-- `idle` — gap from the previous turn's end to this one's start.
-- `re-billed` — the request's uncached input tokens (abbreviated to k).
-- `cached` — the cached-read portion of the same prefill (when the provider
-  reports it), so the rebilled-vs-cached split stays unambiguous.
-- `ttft` — first-token latency, when available; the up arrow hints a rebuild
-  prefill usually ran slower.
+- `idle` —— 距上一轮结束的空闲时长。
+- `re-billed` —— 该请求未命中缓存的输入 token 数（缩写为 k）。
+- `cached` —— 同一 prefill 中命中缓存的部分（provider 回报时显示），让“重算量 vs 命中量”一目了然。
+- `ttft` —— 首 token 时延（取自 assistant timing，可用时显示）；上箭头示意重建 prefill 通常更慢。
 
-It is pure presentation: nothing is written to the session log, no DSH source
-is modified, and it does not take the turn-tail chain, so it does not collide
-with the produced-files row (e.g. `DSH-better-sidebar`).
+纯前端展示：不写入 session log，不修改 DSH 源码，也不占用 turn-tail 链，因此不会与产物文件行冲突（例如 `DSH-better-sidebar`）。
 
-## Miss definition
+## miss 判定
 
-`inputTokens` is the disjoint "uncached input only" count and `cacheReadTokens`
-the cached part of the same prefill, so the cache-hit ratio is
-`hitRatio = cacheReadTokens / (inputTokens + cacheReadTokens)`. A request is a
-miss when, all together:
+`inputTokens` 是"未命中缓存的输入"（disjoint 口径），`cacheReadTokens` 是同一 prefill 中命中的部分，因此缓存命中率 `hitRatio = cacheReadTokens / (inputTokens + cacheReadTokens)`。一个请求同时满足以下三条才算 miss：
 
-- `inputTokens > 0`,
-- `hitRatio < 80%` (over 20% of the prefill was uncached — significant because
-  context accumulates), and
-- `inputTokens >= 1000` (at least 1k tokens actually re-billed).
+- `inputTokens > 0`；
+- `hitRatio < 80%`（超过 20% 的输入未命中——因为上下文是累积的，这部分绝对量已经不小）；
+- `inputTokens >= 1000`（至少有 1k token 真正被重新计费）。
 
-A provider that reports no cache fields counts as a 0% hit ratio. A normal
-continuation reusing the just-built cache therefore stays quiet (hit ratio
-≥ 80%), and `re-billed` shows only the uncached `inputTokens`.
+不回缓存字段的 provider 按命中率 0 处理。正常续写（命中率 ≥ 80%）保持静默；`re-billed` 只显示未命中的 `inputTokens`。
 
-The miss is read from the stream's own `usage` chunk — adapters emit it before
-the terminal finish — so the notice appears as soon as the usage lands (while
-the reply is still streaming), not only once the assistant message settles.
-The line is logged to the browser console once per step, stamped in the
-browser's local time zone.
+miss 数据取自流中的 `usage` chunk（adapter 在终止 finish 之前就会发出），因此提示在 usage 到达时就出现（回复仍在生成中），不必等到 assistant 消息结束。每步在浏览器控制台输出一次，时间戳按浏览器本地时区。
 
-## Install
-
-From a source checkout build the package, then mount it into a profile:
+## 安装
 
 ```sh
-pnpm install
-pnpm build
-dsh plugin --profile web add link:<this-package-path>
+dsh plugin --profile web add github:wefio/dsh-cache-miss
 ```
 
-Restart `dsh web` (or hard-refresh the running GUI) to load the client bundle.
+重启 `dsh web`（或硬刷新正在运行的 GUI）以加载 client bundle。
 
-## Known limitations
+## 已知限制
 
-- TTFT is the wall-clock gap between the step's `step/start` event and its
-  first non-empty token delta, computed from session event times. It is absent
-  (rendered as if no timing) when a boundary fell outside the loaded window.
-- The node publishes for every assistant step, but renders nothing for cache
-  hits, so a hit turn contributes no visible row. Each step logs at most one
-  console line regardless of how many renders follow.
+- TTFT 是 step 的 `step/start` 事件到首个非空 token delta 事件的墙钟间隔，取自会话事件时间；当任一边界落在已加载窗口之外时视为缺省（不显示 `· ttft ...` 段）。
+- 节点对每个 assistant step 都会发布，但命中时渲染为空，因此命中轮不产生可见行；每一步至多输出一条控制台日志。

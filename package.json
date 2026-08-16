@@ -25,7 +25,7 @@
     "cordis.patch.yml",
     "docs",
     "README.md",
-    "README.zh.md",
+    "README.en.md",
     "README.i18n.yaml"
   ],
   "scripts": {
