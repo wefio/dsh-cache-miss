@@ -1,6 +1,6 @@
 {
   "name": "dsh-cache-miss",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "DSH web plugin: a yellow one-line cache-miss notice under the first assistant reply of each turn, when that turn's first request rebuilt the prompt cache.",
   "type": "module",
   "private": false,
@@ -53,10 +53,10 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-client-runtime": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-client-ui-slots": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-client-ui-conversation": "^0.1.0-rc.6",
-    "@deepseek-ai/dsh-invariants": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-client-runtime": ">=0.1.0-rc.6 <0.3.0-0",
+    "@deepseek-ai/dsh-client-ui-slots": ">=0.1.0-rc.6 <0.3.0-0",
+    "@deepseek-ai/dsh-client-ui-conversation": ">=0.1.0-rc.6 <0.3.0-0",
+    "@deepseek-ai/dsh-invariants": ">=0.1.0-rc.6 <0.3.0-0",
     "react": "^18.0.0"
   },
   "devDependencies": {
