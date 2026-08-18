@@ -21,6 +21,7 @@ yellow line, live, as soon as that step's `usage` chunk arrives:
 ```
 Cache miss after 3m idle: 182k tokens re-billed · 0.8k cached · ttft 2.1s ↑
 ```
+![cache-miss notice](cache-miss.png)
 
 - `idle` — gap from the previous turn's end to this one's start.
 - `re-billed` — the request's uncached input tokens (abbreviated to k).

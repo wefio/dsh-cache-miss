@@ -13,6 +13,7 @@ DSH 网页插件：在一轮的**第一条 assistant 回复**正下方，以一�
 ```
 Cache miss after 3m idle: 182k tokens re-billed · 0.8k cached · ttft 2.1s ↑
 ```
+![缓存未命中提示](cache-miss.png)
 
 - `idle` —— 距上一轮结束的空闲时长。
 - `re-billed` —— 该请求未命中缓存的输入 token 数（缩写为 k）。
