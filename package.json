@@ -1,6 +1,6 @@
 {
   "name": "dsh-cache-miss",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "DSH web plugin: a yellow one-line cache-miss notice under the first assistant reply of each turn, when that turn's first request rebuilt the prompt cache.",
   "type": "module",
   "private": false,
