@@ -1,6 +1,6 @@
 {
   "name": "dsh-cache-miss",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "DSH web plugin: a yellow one-line cache-miss notice under the first assistant reply of each turn, when that turn's first request rebuilt the prompt cache.",
   "type": "module",
   "private": true,
@@ -26,11 +26,13 @@
     "docs",
     "README.md",
     "README.en.md",
-    "README.i18n.yaml"
+    "README.i18n.yaml",
+    "cache-miss.png"
   ],
   "scripts": {
     "build": "rimraf lib && tsc -p tsconfig.build.json && tsdown",
     "prepack": "pnpm build",
+    "pack:latest": "pnpm pack && node scripts/pack-latest.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest"
