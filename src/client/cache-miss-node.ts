@@ -2,7 +2,7 @@ import type {
   ChatConversationViewNode, ConversationNodeContext, ConversationNodeDefinition,
 } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
-import { isCacheMiss, type CacheUsage } from './logic'
+import { isCacheAccountingUnavailable, isCacheMiss, type CacheUsage } from './logic'
 
 declare module '@deepseek-ai/dsh-client-ui-conversation/client' {
   interface ChatNodeDataMap {
@@ -22,6 +22,10 @@ export interface CacheMissState {
   readonly step: number
   /** Token accounting from the stream's usage chunk (or assistant/message fallback). */
   readonly usage: CacheUsage | undefined
+  /** True when the step's usage omitted both cache-accounting fields. */
+  readonly missingCacheFields: boolean
+  /** Provider id from the finalized assistant message, when available. */
+  readonly provider: string | undefined
   /** step/start event time, or null when outside the loaded window. */
   readonly stepStartTime: number | null
   /** First non-empty token delta event time, or null when none recorded. */
@@ -36,6 +40,10 @@ export interface CacheMissNodeData {
   readonly turn: number
   readonly step: number
   readonly usage: CacheUsage | undefined
+  /** True when the step's usage omitted both cache-accounting fields. */
+  readonly missingCacheFields: boolean
+  /** Provider id from the finalized assistant message, when available. */
+  readonly provider: string | undefined
   /** step/start event time, or null when outside the loaded window. */
   readonly stepStartTime: number | null
   /** First non-empty token delta event time, or null when none recorded. */
@@ -53,12 +61,25 @@ interface StreamEvent {
     readonly step: number
     readonly chunk?: { readonly type: string; readonly text?: string; readonly name?: string; readonly argumentsDelta?: string; readonly usage?: CacheUsage }
     readonly usage?: CacheUsage
+    readonly message?: {
+      readonly source?: { readonly provider?: string }
+      readonly provenance?: { readonly provider?: string }
+    }
   }
 }
 
 /** Empty per-step boundaries before any event of the step is observed. */
 function emptyState(turn: number, step: number): CacheMissState {
-  return { turn, step, usage: undefined, stepStartTime: null, firstTokenTime: null, missTime: null }
+  return {
+    turn,
+    step,
+    usage: undefined,
+    missingCacheFields: false,
+    provider: undefined,
+    stepStartTime: null,
+    firstTokenTime: null,
+    missTime: null,
+  }
 }
 
 /** Whether a chunk carries a non-empty delta — the first-token boundary. */
@@ -102,7 +123,13 @@ export const cacheMissDefinition: ConversationNodeDefinition<CacheMissState> = {
     if (event.type === 'assistant/chunk') {
       const chunk = event.data.chunk
       if (chunk.type === 'usage') {
-        return { ...context.state, usage: chunk.usage as CacheUsage, missTime: event.time }
+        const usage = chunk.usage as CacheUsage
+        return {
+          ...context.state,
+          usage,
+          missingCacheFields: isCacheAccountingUnavailable(usage),
+          missTime: event.time,
+        }
       }
       if (isTokenDeltaEvent(event) && context.state.firstTokenTime === null) {
         return { ...context.state, firstTokenTime: event.time }
@@ -111,11 +138,20 @@ export const cacheMissDefinition: ConversationNodeDefinition<CacheMissState> = {
     }
     if (event.type === 'assistant/message') {
       const usage = event.data.usage as CacheUsage | undefined
+      // Real AssistantMessage carries `source.provider`; keep `provenance` as a
+      // structural fallback for adapters/versions that use the older field.
+      const message = event.data.message as { source?: { provider?: string }; provenance?: { provider?: string } } | undefined
+      const provider = context.state.provider
+        ?? message?.source?.provider
+        ?? message?.provenance?.provider
       // Providers that report no separate usage chunk still settle usage on the
       // finalized message; keep whichever accounting is present.
       return {
         ...context.state,
         usage: context.state.usage ?? usage,
+        missingCacheFields: context.state.missingCacheFields
+          || (usage !== undefined && isCacheAccountingUnavailable(usage)),
+        provider,
         missTime: context.state.missTime ?? event.time,
       }
     }
@@ -131,7 +167,9 @@ export const cacheMissDefinition: ConversationNodeDefinition<CacheMissState> = {
   buildLocationData: () => null,
   buildViewNode: (context): ChatConversationViewNode | null => {
     const state = context.state
-    if (state === undefined || !isCacheMiss(state.usage)) return null
+    if (state === undefined) return null
+    const isMiss = isCacheMiss(state.usage)
+    if (!isMiss && !state.missingCacheFields) return null
     return {
       key: context.key,
       kind: 'cache-miss',
@@ -144,6 +182,8 @@ export const cacheMissDefinition: ConversationNodeDefinition<CacheMissState> = {
         turn: state.turn,
         step: state.step,
         usage: state.usage,
+        missingCacheFields: state.missingCacheFields,
+        provider: state.provider,
         stepStartTime: state.stepStartTime,
         firstTokenTime: state.firstTokenTime,
         missTime: state.missTime,

@@ -31,7 +31,11 @@ StreamChunk,adapter 在终止 finish 之前发出,内含 `inputTokens` / `cacheR
 - `hitRatio < 80%`(超过 20% 的输入未命中);
 - `inputTokens >= 1000`(至少 1k token 真正重算)。
 
-`cacheReadTokens` 缺失按命中率 0 处理。正常续写(命中率 >= 80%)不渲染任何内容。
+`cacheReadTokens` 缺失且 `cacheWriteTokens` 也缺失时,若该 provider 从未出现过任意
+cache 字段,插件无法区分「完全 miss」与「命中但不报明细」,不判 miss,渲染灰色提示
+`Provider reports no cache fields — cannot confirm cache status`(每个无证据 provider
+一次)。若该 provider 此前出现过 cache 字段,缺失按 `cacheRead = 0` 处理,即完全 miss。
+正常续写(命中率 >= 80%)不渲染任何内容。
 
 `re-billed` 只显示 `inputTokens`(未命中部分),即本次 miss 真正重新计费的输入;
 旁边再显示 `cached`(`cacheReadTokens`,命中部分),二者相加即本次 prefill 总量。
@@ -54,6 +58,14 @@ Cache miss after 3m idle: 182k tokens re-billed · 0.8k cached · ttft 2.1s ↑
   `step/start` 事件时间,秒、一位小数,末尾加向上箭头示意重建 prefill 通常更慢;
   边界缺失时不显示该段。
 - 纯文本,无 emoji,不自动消失,刷新页面后随会话投影自然消失。
+
+当 provider 回 usage 但不回 `cacheReadTokens`/`cacheWriteTokens`,且从未出现过任何
+cache 字段时,插件无法区分「完全 miss」与「命中但不报明细」,渲染一条灰色提示,文案为
+`Provider reports no cache fields — cannot confirm cache status`。每个这样的 provider
+首次出现时提示一次;切换到另一个无证据的 provider 会再次提示。控制台同步输出每个
+provider 一次的更详细 warning(含 turn/step、provider、`inputTokens` 与缺失字段说明)。
+一旦该 provider 出现过任一 cache 字段,后续无字段的请求按完全 miss 正常显示黄线。
+不做 TTFT 启发式兜底:用户间隔可能远超 TTFT 阈值,无法可靠区分 cache miss 与网络/负载慢。
 
 ## 渲染与落点
 

@@ -13,6 +13,20 @@ export interface CacheUsage {
   cacheWriteTokens?: number
 }
 
+/** Whether a usage record omits both cache-accounting fields. Absence can mean
+ * either a full miss (adapters such as DeepSeek omit `cacheReadTokens` when it
+ * is 0) or a provider that never reports cache fields; callers use
+ * {@link hasCacheFields} together with per-provider evidence to distinguish. */
+export function isCacheAccountingUnavailable(usage: CacheUsage | undefined): boolean {
+  if (usage === undefined) return false
+  return typeof usage.cacheReadTokens !== 'number' && typeof usage.cacheWriteTokens !== 'number'
+}
+
+/** Whether a usage record carries at least one cache-accounting field. */
+export function hasCacheFields(usage: CacheUsage | undefined): boolean {
+  return !isCacheAccountingUnavailable(usage)
+}
+
 /** Fixed token abbreviation divisor (k = thousands). */
 const K = 1000
 
@@ -32,15 +46,23 @@ const MISS_HIT_RATIO = 0.8
  * `hitRatio = cacheRead / (input + cacheRead)` is this request's cache-hit rate.
  * A miss requires billed uncached input, a hit ratio below {@link MISS_HIT_RATIO}
  * (over 20% uncached), and an absolute uncached amount of at least
- * {@link MIN_MISS_TOKENS} (1k). A provider that reports no cache fields is
- * treated as a 0% hit ratio.
+ * {@link MIN_MISS_TOKENS} (1k).
+ *
+ * When the usage carries no cache fields, the result depends on
+ * `hasCacheEvidence`: true means the caller already knows this provider reports
+ * cache accounting (so an omitted field is a true 0 read and the request is a
+ * full miss); false means the provider has never shown cache fields, so the
+ * request cannot be classified here and the caller should surface the
+ * {@link UNCONFIRMED_LINE} notice instead.
  *
  * @param usage - the request's token accounting, or undefined when the adapter reported none.
+ * @param hasCacheEvidence - whether the provider has previously reported any cache field.
  */
-export function isCacheMiss(usage: CacheUsage | undefined): boolean {
+export function isCacheMiss(usage: CacheUsage | undefined, hasCacheEvidence = true): boolean {
   if (usage === undefined) return false
   const input = usage.inputTokens
   if (input <= 0 || input < MIN_MISS_TOKENS) return false
+  if (!hasCacheFields(usage) && !hasCacheEvidence) return false
   const cacheRead = typeof usage.cacheReadTokens === 'number' ? usage.cacheReadTokens : 0
   const hitRatio = input + Math.max(0, cacheRead) > 0 ? Math.max(0, cacheRead) / (input + Math.max(0, cacheRead)) : 0
   return hitRatio < MISS_HIT_RATIO
@@ -118,6 +140,17 @@ export function formatLine(facts: LineFacts): string {
   return tail.length > 0 ? `${body} · ${tail.join(' · ')}` : body
 }
 
+/** Neutral one-time line for a provider that has never reported any cache
+ * field. The plugin cannot tell a genuine full miss from a provider that hides
+ * cached input, so it says exactly that instead of claiming a miss. */
+export const UNCONFIRMED_LINE = 'Provider reports no cache fields — cannot confirm cache status'
+
+/** Formatter kept symmetrical with {@link formatLine} so the renderer can treat
+ * both notice kinds uniformly. */
+export function formatUnconfirmedLine(): string {
+  return UNCONFIRMED_LINE
+}
+
 /** Facts about the turn's timing, resolved from the conversation snapshot. */
 export interface TurnTimingFacts {
   /** Whether any prior turn exists. Turn numbers are global and monotonic
@@ -167,24 +200,39 @@ export interface LineInput {
    * miss into a cold start). False means the first turn of a fresh cache,
    * which must not be shown as a cache miss. */
   hasPriorTurn: boolean
+  /** Whether the active provider has ever reported a cache-accounting field.
+   * False for a provider with no cache evidence; such requests surface the
+   * {@link UNCONFIRMED_LINE} notice instead of a miss. */
+  hasCacheEvidence: boolean
 }
 
-/** Union of render states: either show a line or hide. */
-export type LineStatus = { kind: 'show'; line: string } | { kind: 'hidden' }
+/** Union of render states: show a miss line, show an unconfirmed-provider
+ * notice, or hide. */
+export type LineStatus =
+  | { kind: 'show'; line: string }
+  | { kind: 'unconfirmed'; line: string }
+  | { kind: 'hidden' }
 
 /**
  * Decide whether and what to render for one turn.
  * @param input - usage plus timing facts for the turn's first assistant.
- * @returns a show status with the formatted line, or hidden for a hit/absent
- *   or a cold-start first turn (no prior turn to have lost its cache).
+ * @returns a show status with the formatted line, an unconfirmed status with
+ *   the provider notice, or hidden for a hit/absent or a cold-start first turn
+ *   (no prior turn to have lost its cache).
  */
 export function getLineStatus(input: LineInput): LineStatus {
   const usage = input.usage
   if (usage === undefined) return { kind: 'hidden' }
+  // A provider that has never reported cache fields cannot be classified; the
+  // notice is independent of prior turns because the limitation is about the
+  // provider, not about whether this particular request could have missed.
+  if (!hasCacheFields(usage) && !input.hasCacheEvidence) {
+    return { kind: 'unconfirmed', line: formatUnconfirmedLine() }
+  }
   // A cold start (first turn, empty cache) looks token-identical to a real miss
   // (inputTokens > 0, no cache read), so require a prior turn before declaring a miss.
   if (!input.hasPriorTurn) return { kind: 'hidden' }
-  if (!isCacheMiss(usage)) return { kind: 'hidden' }
+  if (!isCacheMiss(usage, input.hasCacheEvidence)) return { kind: 'hidden' }
   return {
     kind: 'show',
     line: formatLine({

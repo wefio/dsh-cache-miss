@@ -50,7 +50,7 @@ describe('cacheMissDefinition.start / update', () => {
 
   it('opens with no usage but records the step start time', () => {
     expect(cacheMissDefinition.start!({} as any, { event: stepStart(4, 2) } as any)).toEqual({
-      turn: 4, step: 2, usage: undefined, stepStartTime: 1000, firstTokenTime: null, missTime: null,
+      turn: 4, step: 2, usage: undefined, missingCacheFields: false, provider: undefined, stepStartTime: 1000, firstTokenTime: null, missTime: null,
     })
   })
 
@@ -74,11 +74,29 @@ describe('cacheMissDefinition.start / update', () => {
   })
 
   it('fills a missing usage from the finalized message without losing timing', () => {
-    const ctx: any = { state: { turn: 4, step: 2, usage: undefined, stepStartTime: 1000, firstTokenTime: 1200, missTime: null } }
+    const ctx: any = { state: { turn: 4, step: 2, usage: undefined, missingCacheFields: false, provider: undefined, stepStartTime: 1000, firstTokenTime: 1200, missTime: null } }
     const after = cacheMissDefinition.update!(ctx, { event: assistantMessage(4, 2, 9, 3000, { inputTokens: 42 }) } as any)
     expect(after.usage).toEqual({ inputTokens: 42 })
     expect(after.missTime).toBe(3000)
     expect(after.firstTokenTime).toBe(1200)
+    expect(after.provider).toBeUndefined()
+  })
+
+  it('captures provider from the finalized assistant message', () => {
+    const ctx = contextWith(4, 2)
+    const event = {
+      type: 'assistant/message',
+      seq: 9,
+      time: 3000,
+      data: {
+        turn: 4,
+        step: 2,
+        message: { source: { provider: 'deepseek-official' }, content: [], id: 'm' },
+        usage: { inputTokens: 42 },
+      },
+    }
+    const after = cacheMissDefinition.update!(ctx as any, { event } as any)
+    expect(after.provider).toBe('deepseek-official')
   })
 })
 
@@ -86,27 +104,40 @@ describe('cacheMissDefinition.buildViewNode', () => {
   it('publishes a node as soon as the usage chunk reports a miss', () => {
     const node = cacheMissDefinition.buildViewNode!({
       key: 'k', id: '1:1', kind: 'cache-miss', target: 'chat',
-      state: { turn: 1, step: 1, usage: { inputTokens: 9000 }, stepStartTime: 1000, firstTokenTime: 1200, missTime: 2000 },
+      state: { turn: 1, step: 1, usage: { inputTokens: 9000, cacheReadTokens: 0 }, missingCacheFields: false, provider: undefined, stepStartTime: 1000, firstTokenTime: 1200, missTime: 2000 },
       start: { event: stepStart(1, 1), role: 'start', location: { kind: 'turn', turn: {} } },
-      matches: [{ event: chunk(1, 1, 2, 2000, 'usage', { usage: { inputTokens: 9000 } }) }],
+      matches: [{ event: chunk(1, 1, 2, 2000, 'usage', { usage: { inputTokens: 9000, cacheReadTokens: 0 } }) }],
     } as any)
     expect(node).not.toBeNull()
     expect(node!.kind).toBe('cache-miss')
     expect(node!.data).toEqual({
-      turn: 1, step: 1, usage: { inputTokens: 9000 }, stepStartTime: 1000, firstTokenTime: 1200, missTime: 2000,
+      turn: 1, step: 1, usage: { inputTokens: 9000, cacheReadTokens: 0 }, missingCacheFields: false, provider: undefined, stepStartTime: 1000, firstTokenTime: 1200, missTime: 2000,
+    })
+  })
+
+  it('publishes an unsupported node when usage lacks both cache fields', () => {
+    const node = cacheMissDefinition.buildViewNode!({
+      key: 'k', id: '1:1', kind: 'cache-miss', target: 'chat',
+      state: { turn: 1, step: 1, usage: { inputTokens: 9000 }, missingCacheFields: true, provider: 'deepseek-official', stepStartTime: 1000, firstTokenTime: 1200, missTime: 2000 },
+      start: { event: stepStart(1, 1), role: 'start', location: { kind: 'turn', turn: {} } },
+      matches: [{ event: chunk(1, 1, 2, 2000, 'usage', { usage: { inputTokens: 9000 } }) }],
+    } as any)
+    expect(node).not.toBeNull()
+    expect(node!.data).toEqual({
+      turn: 1, step: 1, usage: { inputTokens: 9000 }, missingCacheFields: true, provider: 'deepseek-official', stepStartTime: 1000, firstTokenTime: 1200, missTime: 2000,
     })
   })
 
   it('publishes no node on a cache hit', () => {
     expect(cacheMissDefinition.buildViewNode!({
-      state: { turn: 1, step: 1, usage: { inputTokens: 9000, cacheReadTokens: 121000 }, stepStartTime: 1000, firstTokenTime: 1200, missTime: 2000 },
+      state: { turn: 1, step: 1, usage: { inputTokens: 9000, cacheReadTokens: 121000 }, missingCacheFields: false, provider: undefined, stepStartTime: 1000, firstTokenTime: 1200, missTime: 2000 },
       key: 'k', id: '1:1', target: 'chat', matches: [],
     } as any)).toBeNull()
   })
 
   it('publishes no node without usage', () => {
     expect(cacheMissDefinition.buildViewNode!({
-      state: { turn: 1, step: 1, usage: undefined, stepStartTime: null, firstTokenTime: null, missTime: null },
+      state: { turn: 1, step: 1, usage: undefined, missingCacheFields: false, provider: undefined, stepStartTime: null, firstTokenTime: null, missTime: null },
       key: 'k', id: '1:1', target: 'chat', matches: [],
     } as any)).toBeNull()
   })

@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import { formatLine, formatLocalTime, getLineStatus, isCacheMiss, ttftMs, type CacheUsage } from '../src/client/logic'
+import {
+  formatLine,
+  formatLocalTime,
+  formatUnconfirmedLine,
+  getLineStatus,
+  isCacheAccountingUnavailable,
+  isCacheMiss,
+  ttftMs,
+  UNCONFIRMED_LINE,
+  type CacheUsage,
+} from '../src/client/logic'
 
 describe('isCacheMiss', () => {
   it('is false when a large cached read dominates a small uncached input', () => {
@@ -18,9 +28,14 @@ describe('isCacheMiss', () => {
     expect(isCacheMiss(usage)).toBe(true)
   })
 
-  it('is true when cacheReadTokens is missing and inputTokens >= 1000', () => {
+  it('is false when cache fields are absent and there is no per-provider evidence', () => {
     const usage: CacheUsage = { inputTokens: 182000 }
-    expect(isCacheMiss(usage)).toBe(true)
+    expect(isCacheMiss(usage, false)).toBe(false)
+  })
+
+  it('is true when cache fields are absent but the provider has proven cache accounting', () => {
+    const usage: CacheUsage = { inputTokens: 182000 }
+    expect(isCacheMiss(usage, true)).toBe(true)
   })
 
   it('is false when uncached input is below the 1k floor even at 0% hit ratio', () => {
@@ -41,6 +56,31 @@ describe('isCacheMiss', () => {
 
   it('handles missing usage object as not a miss (no basis)', () => {
     expect(isCacheMiss(undefined)).toBe(false)
+  })
+})
+
+describe('isCacheAccountingUnavailable', () => {
+  it('is true when usage exists but neither cache field is a number', () => {
+    expect(isCacheAccountingUnavailable({ inputTokens: 100 })).toBe(true)
+  })
+
+  it('is false when cacheReadTokens is a number (including zero)', () => {
+    expect(isCacheAccountingUnavailable({ inputTokens: 100, cacheReadTokens: 0 })).toBe(false)
+    expect(isCacheAccountingUnavailable({ inputTokens: 100, cacheReadTokens: 50 })).toBe(false)
+  })
+
+  it('is false when cacheWriteTokens is a number', () => {
+    expect(isCacheAccountingUnavailable({ inputTokens: 100, cacheWriteTokens: 20 })).toBe(false)
+  })
+
+  it('is false when usage is undefined (no basis, handled separately)', () => {
+    expect(isCacheAccountingUnavailable(undefined)).toBe(false)
+  })
+})
+
+describe('formatUnconfirmedLine', () => {
+  it('returns the fixed unconfirmed-provider notice', () => {
+    expect(formatUnconfirmedLine()).toBe(UNCONFIRMED_LINE)
   })
 })
 
@@ -78,18 +118,35 @@ describe('formatLine', () => {
 
 describe('getLineStatus', () => {
   it('returns a line status for a miss', () => {
-    const s = getLineStatus({ usage: { inputTokens: 10_000 }, idleMs: 90_000, ttftMs: 1200, hasPriorTurn: true })
+    const s = getLineStatus({ usage: { inputTokens: 10_000, cacheReadTokens: 0 }, idleMs: 90_000, ttftMs: 1200, hasPriorTurn: true, hasCacheEvidence: true })
     expect(s.kind).toBe('show')
-    expect(s.line).toBe('Cache miss after 1m idle: 10k tokens re-billed · ttft 1.2s ↑')
+    expect(s.line).toBe('Cache miss after 1m idle: 10k tokens re-billed · 0k cached · ttft 1.2s ↑')
+  })
+
+  it('returns an unconfirmed status when usage lacks cache fields and the provider has no evidence', () => {
+    const s = getLineStatus({ usage: { inputTokens: 10_000 }, idleMs: 90_000, ttftMs: 1200, hasPriorTurn: true, hasCacheEvidence: false })
+    expect(s.kind).toBe('unconfirmed')
+    expect(s.kind === 'unconfirmed' && s.line).toBe(UNCONFIRMED_LINE)
+  })
+
+  it('returns an unconfirmed status even on a cold-start first turn (provider limitation, not miss)', () => {
+    const s = getLineStatus({ usage: { inputTokens: 10_000 }, idleMs: 0, ttftMs: 0, hasPriorTurn: false, hasCacheEvidence: false })
+    expect(s.kind).toBe('unconfirmed')
+  })
+
+  it('returns a miss when usage lacks cache fields but the provider has proven cache accounting', () => {
+    const s = getLineStatus({ usage: { inputTokens: 10_000 }, idleMs: 0, ttftMs: 0, hasPriorTurn: true, hasCacheEvidence: true })
+    expect(s.kind).toBe('show')
+    expect(s.line).toBe('Cache miss after 0s idle: 10k tokens re-billed')
   })
 
   it('returns hidden for a hit', () => {
-    const s = getLineStatus({ usage: { inputTokens: 79, cacheReadTokens: 152064 }, idleMs: 0, ttftMs: 0, hasPriorTurn: true })
+    const s = getLineStatus({ usage: { inputTokens: 79, cacheReadTokens: 152064 }, idleMs: 0, ttftMs: 0, hasPriorTurn: true, hasCacheEvidence: true })
     expect(s.kind).toBe('hidden')
   })
 
   it('returns hidden when there is no usage', () => {
-    const s = getLineStatus({ usage: undefined, idleMs: 0, ttftMs: 0, hasPriorTurn: true })
+    const s = getLineStatus({ usage: undefined, idleMs: 0, ttftMs: 0, hasPriorTurn: true, hasCacheEvidence: true })
     expect(s.kind).toBe('hidden')
   })
 
@@ -99,6 +156,7 @@ describe('getLineStatus', () => {
       idleMs: 0,
       ttftMs: 0,
       hasPriorTurn: true,
+      hasCacheEvidence: true,
     })
     expect(s.kind).toBe('show')
     expect(s.line).toBe('Cache miss after 0s idle: 10k tokens re-billed · 0k cached')
@@ -110,13 +168,14 @@ describe('getLineStatus', () => {
       idleMs: 60_000,
       ttftMs: 0,
       hasPriorTurn: true,
+      hasCacheEvidence: true,
     })
     expect(s.kind).toBe('show')
     expect(s.line).toBe('Cache miss after 1m idle: 181k tokens re-billed · 1k cached')
   })
 
   it('returns hidden for a cold-start first turn (no prior turn)', () => {
-    const s = getLineStatus({ usage: { inputTokens: 10_000 }, idleMs: 0, ttftMs: 0, hasPriorTurn: false })
+    const s = getLineStatus({ usage: { inputTokens: 10_000, cacheReadTokens: 0 }, idleMs: 0, ttftMs: 0, hasPriorTurn: false, hasCacheEvidence: true })
     expect(s.kind).toBe('hidden')
   })
 })

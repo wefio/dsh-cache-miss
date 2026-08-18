@@ -30,7 +30,7 @@ Cache miss after 3m idle: 182k tokens re-billed · 0.8k cached · ttft 2.1s ↑
 - `hitRatio < 80%`（超过 20% 的输入未命中——因为上下文是累积的，这部分绝对量已经不小）；
 - `inputTokens >= 1000`（至少有 1k token 真正被重新计费）。
 
-不回缓存字段的 provider 按命中率 0 处理。正常续写（命中率 ≥ 80%）保持静默；`re-billed` 只显示未命中的 `inputTokens`。
+回 usage 但不回 cache 字段的 provider，在从未见过该 provider 的任何 cache 字段前，插件无法区分「完全 miss」与「命中但不报 cache 明细」：此时不把它误报成 miss，而是渲染一条灰色提示 `Provider reports no cache fields — cannot confirm cache status`。每个这样的 provider 首次出现时提示一次，切换到另一个这样的 provider 会再次提示；控制台同步输出每个 provider 一次更详细的 warning。一旦该 provider 出现过任一 cache 字段，后续无字段的请求按完全 miss 正常显示黄色 miss。完全不回 usage 的 provider 保持静默（不产生任何提示）。正常续写（命中率 ≥ 80%）保持静默；`re-billed` 只显示未命中的 `inputTokens`。
 
 miss 数据取自流中的 `usage` chunk（adapter 在终止 finish 之前就会发出），因此提示在 usage 到达时就出现（回复仍在生成中），不必等到 assistant 消息结束。每步在浏览器控制台输出一次，时间戳按浏览器本地时区。
 
@@ -46,3 +46,4 @@ dsh plugin --profile web add dsh-cache-miss
 
 - TTFT 是 step 的 `step/start` 事件到首个非空 token delta 事件的墙钟间隔，取自会话事件时间；当任一边界落在已加载窗口之外时视为缺省（不显示 `· ttft ...` 段）。
 - 节点对每个 assistant step 都会发布，但命中时渲染为空，因此命中轮不产生可见行；每一步至多输出一条控制台日志。
+- 从未出现 cache 字段的 provider 首次出现时显示一次灰色“无法确认”提示，不做启发式猜测——TTFT 受网络/负载影响，无法可靠区分"cache miss 导致慢"与"本来就慢"。

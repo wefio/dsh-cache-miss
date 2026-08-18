@@ -46,9 +46,17 @@ miss when, all together:
   context accumulates), and
 - `inputTokens >= 1000` (at least 1k tokens actually re-billed).
 
-A provider that reports no cache fields counts as a 0% hit ratio. A normal
-continuation reusing the just-built cache therefore stays quiet (hit ratio
-≥ 80%), and `re-billed` shows only the uncached `inputTokens`.
+A provider that reports usage but no cache fields cannot be classified until it
+has ever shown a cache field. Before that evidence exists, the plugin does not
+misreport the request as a miss; it shows a grey notice
+`Provider reports no cache fields — cannot confirm cache status`. Each such
+provider is noticed once; switching to another no-evidence provider surfaces a
+fresh notice, with a more detailed per-provider warning in the console. Once a
+provider has shown any cache field, later requests without fields are treated as
+full misses and show the yellow miss line normally. A provider that reports no
+usage at all stays silent. A normal continuation reusing the just-built cache
+therefore stays quiet (hit ratio ≥ 80%), and `re-billed` shows only the
+uncached `inputTokens`.
 
 The miss is read from the stream's own `usage` chunk — adapters emit it before
 the terminal finish — so the notice appears as soon as the usage lands (while
@@ -72,3 +80,6 @@ Restart `dsh web` (or hard-refresh the running GUI) to load the client bundle.
 - The node publishes for every assistant step, but renders nothing for cache
   hits, so a hit turn contributes no visible row. Each step logs at most one
   console line regardless of how many renders follow.
+- Providers that have never reported cache fields get one grey notice per
+  provider and no heuristic guess: TTFT is too sensitive to network/load to
+  reliably separate "slow because of a cache miss" from "just slow".
