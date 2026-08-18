@@ -59,7 +59,7 @@ browser's local time zone.
 ## Install
 
 ```sh
-dsh plugin --profile web add https://github.com/wefio/dsh-cache-miss/releases/latest/download/dsh-cache-miss.tgz
+dsh plugin --profile web add dsh-cache-miss
 ```
 
 Restart `dsh web` (or hard-refresh the running GUI) to load the client bundle.

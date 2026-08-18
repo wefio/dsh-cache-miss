@@ -37,7 +37,7 @@ miss 数据取自流中的 `usage` chunk（adapter 在终止 finish 之前就会
 ## 安装
 
 ```sh
-dsh plugin --profile web add https://github.com/wefio/dsh-cache-miss/releases/latest/download/dsh-cache-miss.tgz
+dsh plugin --profile web add dsh-cache-miss
 ```
 
 重启 `dsh web`（或硬刷新正在运行的 GUI）以加载 client bundle。
