@@ -78,7 +78,7 @@ provider 一次的更详细 warning(含 turn/step、provider、`inputTokens` 与
 - 因此与 `DSH-better-sidebar` 在 `turnTail` 的产物文件行互不冲突:
   本插件渲染在 step 内,产物行渲染在轮尾;二者位置不同、各自独立。
 
-依赖注入:`conversationEvents`(注册 Definition)与 `slots`(注册 keyed 渲染器)。
+依赖注入:只硬依赖 web 端必然存在的 `slots`(注册 keyed 渲染器)。Definition 的注册是 best-effort,并推迟到 `conversation.chat.node` 座位被声明时进行——该座位由 `ui-chat` 声明,而 `ui-chat` inject 了 `uiConversation`,因此此刻注册表必定 ACTIVE。探测用 `ctx.get('uiConversation')?.events ?? ctx.get('conversationEvents')`(0.1.2-rc.1 起为 `uiConversation.events`;旧核心为 `conversationEvents`)。之所以必须走 `ctx.get` 而非属性读取:loader 条目之间是兄弟节点,属性读取未 inject 的服务会抛 `cannot get property "<name>" without inject`,那会在 apply 期直接抛错(而非降级);`ctx.get` 读全局服务存储,找不到返回 undefined。找不到注册表时降级为 no-op 并打一条 console.warn,绝不 pending、绝不影响 dsh 启动。注册返回的 disposer 挂到本 fiber,卸载/热重载时移除,避免残留 Definition 导致下次 "already registered"。
 
 每次 miss 在浏览器控制台输出一行,带浏览器本地时区时间戳;渲染器用 ref 去重,
 每 `turn:step` 至多输出一次,不会因重复渲染而堆积。
