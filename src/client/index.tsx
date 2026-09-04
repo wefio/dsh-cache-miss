@@ -127,14 +127,88 @@ function CacheMissLine(props: CacheMissLineProps): React.ReactElement | null {
   return null
 }
 
-/** Services required by the cache-miss browser half. */
-export const inject = ['conversationEvents', 'slots']
+/**
+ * Services required by the cache-miss browser half.
+ *
+ * Only `slots` is a hard dependency (always present on the web surface). The
+ * conversation-node registry — where a node Definition is registered — is
+ * core-owned and its service key has changed across core versions (this core
+ * exposes `ctx.uiConversation.events`; legacy `ctx.conversationEvents` still
+ * exists on other cores). It is resolved structurally with `ctx.get` instead
+ * of being injected or read as a property: a loader entry is a sibling of the
+ * core entry that provides the service, so property access without `inject`
+ * throws `cannot get property "<name>" without inject` and would fail apply —
+ * not degrade. `ctx.get` reads the global service store and returns
+ * `undefined` when absent, so a missing or renamed registry disables only the
+ * cache-miss lines, never pending or boot failure.
+ */
+export const inject = ['slots']
 
-/** Register the cache-miss Definition and its keyed chat-node renderer. */
+/** The register-capable Definition registry surface the cache-miss Definition needs. */
+interface CacheMissRegistry {
+  register(definition: unknown): () => void
+}
+
+/** Structural registry read across the two core service names. */
+function registerCacheMissDefinition(
+  ctx: Context,
+  registerAt: (registry: CacheMissRegistry) => void,
+): void {
+  const readService = (name: string): unknown => {
+    try {
+      return (ctx as unknown as { get(name: string): unknown }).get(name)
+    } catch {
+      return undefined
+    }
+  }
+  const asRegistry = (value: unknown): CacheMissRegistry | undefined => {
+    if (value === null || typeof value !== 'object') return undefined
+    const node = value as { register?: (definition: unknown) => () => void; events?: unknown }
+    if (typeof node.register === 'function') return node as CacheMissRegistry
+    const events = node.events
+    if (events !== null && typeof events === 'object') {
+      const eventsNode = events as { register?: (definition: unknown) => () => void }
+      if (typeof eventsNode.register === 'function') return eventsNode as CacheMissRegistry
+    }
+    return undefined
+  }
+  const registry = asRegistry(readService('uiConversation'))
+    ?? asRegistry(readService('conversationEvents'))
+  if (registry === undefined) {
+    console.warn(
+      '[dsh-cache-miss] conversation-node registry unavailable; cache-miss lines are disabled. '
+      + 'Expected the registry on browser service uiConversation.events (or legacy conversationEvents).',
+    )
+    return
+  }
+  registerAt(registry)
+}
+
+/** Register the cache-miss Definition (best-effort) and its keyed chat-node renderer. */
 export function apply(ctx: Context): void {
-  ctx.conversationEvents.register(cacheMissDefinition)
-  ctx.slots.inject('conversation.chat.node', () => ctx.slots.register({
-    name: 'conversation.chat.node',
-    key: 'cache-miss',
-  }, CacheMissLine))
+  // Defer Definition registration until the chat-node seat is declared: that
+  // declaration lives under ui-chat, which injects `uiConversation`, so by the
+  // time this callback fires the registry is guaranteed ACTIVE and `ctx.get`
+  // resolves it. The seat still mounts even when registration degrades.
+  let definitionRegistered = false
+  ctx.slots.inject('conversation.chat.node', () => {
+    if (!definitionRegistered) {
+      registerCacheMissDefinition(ctx, (registry) => {
+        try {
+          const dispose = registry.register(cacheMissDefinition)
+          // The Definition is owned by the registry's core context; tie the
+          // disposer to this fiber so an unload/reload does not leave a stale
+          // `cache-miss` Definition that makes the next run throw "already registered".
+          ctx.effect(() => dispose)
+          definitionRegistered = true
+        } catch (error) {
+          console.warn('[dsh-cache-miss] failed to register the cache-miss node; cache-miss lines are disabled.', error)
+        }
+      })
+    }
+    return ctx.slots.register({
+      name: 'conversation.chat.node',
+      key: 'cache-miss',
+    }, CacheMissLine)
+  })
 }
