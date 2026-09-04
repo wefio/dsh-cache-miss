@@ -1,5 +1,7 @@
 # dsh-cache-miss
 
+[![dsh.so install](https://www.dsh.so/badge/install/dsh-cache-miss.svg)](https://www.dsh.so/artifact/dsh-cache-miss/)
+
 [English](README.en.md)
 
 DSH 网页插件：在一轮的**第一条 assistant 回复**正下方，以一条黄色单行提示该轮首次请求的提示缓存未命中（prompt cache miss）。
