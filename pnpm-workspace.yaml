@@ -1,2 +1,8 @@
 allowBuilds:
   esbuild: true
+# js-yaml reaches this graph only through the @deepseek-ai dev-dependency SDK
+# chain (cordis-plugin-include); the plugin itself ships no runtime dependency.
+# Pin the patched 4.x so the build toolchain stops matching GHSA-2883-xcg3-v3hh
+# (4.x is still supported upstream under the v4-legacy tag).
+overrides:
+  "js-yaml@^4.0.0": "^4.3.2"
