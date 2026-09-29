@@ -2,7 +2,7 @@ import type {
   ChatConversationViewNode, ConversationNodeContext, ConversationNodeDefinition,
 } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
-import { isCacheAccountingUnavailable, isCacheMiss, type CacheUsage } from './logic'
+import { firstTokenTimeFromStream, isCacheAccountingUnavailable, isCacheMiss, type CacheUsage } from './logic'
 
 declare module '@deepseek-ai/dsh-client-ui-conversation/client' {
   interface ChatNodeDataMap {
@@ -61,6 +61,9 @@ interface StreamEvent {
     readonly step: number
     readonly chunk?: { readonly type: string; readonly text?: string; readonly name?: string; readonly argumentsDelta?: string; readonly usage?: CacheUsage }
     readonly usage?: CacheUsage
+    /** Rolled-up streaming timeline carried by the settled message on cores
+     * that no longer emit separate `assistant/chunk` events. */
+    readonly stream?: unknown
     readonly message?: {
       readonly source?: { readonly provider?: string }
       readonly provenance?: { readonly provider?: string }
@@ -96,14 +99,21 @@ function isTokenDeltaEvent(event: StreamEvent): boolean {
 
 /**
  * Conversation node that emits one prompt-cache-miss notice per assistant
- * reply whose model request rebuilt the prompt cache. It answers the stream's
- * own `usage` chunk — which adapters emit before the terminal finish — so a
- * miss is published as soon as the usage arrives (while tokens are still
- * streaming), not only once the assistant message settles. Each `turn:step`
- * owns an independent Context: a request that missed renders a line under that
- * reply; one that hit renders nothing. It is additive: the node uses its own
- * kind and never takes the turn-tail chain, so it does not collide with
- * better-sidebar's produced-files row.
+ * reply whose model request rebuilt the prompt cache.
+ *
+ * Two event dialects are accepted, because cores differ: cores that stream
+ * `assistant/chunk` events carry the usage before the terminal finish (so a miss
+ * publishes while tokens are still streaming) and expose the first token as a
+ * delta chunk; cores that emit only `step/start` + `assistant/message` settle
+ * everything on the message, including the rolled-up stream timeline the
+ * first-token boundary is read from. Both are read explicitly — neither is
+ * assumed to exist — and a core offering only the latter still publishes the
+ * line, just when the reply settles.
+ *
+ * Each `turn:step` owns an independent Context: a request that missed renders a
+ * line under that reply; one that hit renders nothing. It is additive: the node
+ * uses its own kind and never takes the turn-tail chain, so it does not collide
+ * with better-sidebar's produced-files row.
  */
 export const cacheMissDefinition: ConversationNodeDefinition<CacheMissState> = {
   kind: 'cache-miss',
@@ -145,13 +155,18 @@ export const cacheMissDefinition: ConversationNodeDefinition<CacheMissState> = {
         ?? message?.source?.provider
         ?? message?.provenance?.provider
       // Providers that report no separate usage chunk still settle usage on the
-      // finalized message; keep whichever accounting is present.
+      // finalized message; keep whichever accounting is present. The settled
+      // message also carries the rolled-up stream timeline on cores that emit
+      // no `assistant/chunk` events, so the first-token boundary is recovered
+      // from there when the step saw no chunk of its own.
       return {
         ...context.state,
         usage: context.state.usage ?? usage,
         missingCacheFields: context.state.missingCacheFields
           || (usage !== undefined && isCacheAccountingUnavailable(usage)),
         provider,
+        firstTokenTime: context.state.firstTokenTime
+          ?? firstTokenTimeFromStream((event.data as { stream?: unknown }).stream),
         missTime: context.state.missTime ?? event.time,
       }
     }
@@ -175,6 +190,10 @@ export const cacheMissDefinition: ConversationNodeDefinition<CacheMissState> = {
       kind: 'cache-miss',
       id: context.id,
       target: 'chat',
+      // `anchorSeq` / `location` / `visibility` belong to the 0.1.x view-node
+      // shape. Cores from 0.2 narrowed the contract to key/kind/id/target/data
+      // and ignore extra fields, so they are emitted only for the older shape
+      // that still places a node by its anchor.
       anchorSeq: context.matches.at(-1)?.event.seq ?? context.start?.event.seq ?? 0,
       location: context.matches.at(-1)?.location ?? context.start?.location ?? { kind: 'unresolved' },
       visibility: 'visible',

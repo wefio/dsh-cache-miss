@@ -98,6 +98,40 @@ describe('cacheMissDefinition.start / update', () => {
     const after = cacheMissDefinition.update!(ctx as any, { event } as any)
     expect(after.provider).toBe('deepseek-official')
   })
+
+  it('recovers the first-token time from a settled message stream when no chunk events arrive', () => {
+    const ctx = contextWith(4, 2)
+    const event = {
+      type: 'assistant/message',
+      seq: 9,
+      time: 3000,
+      data: {
+        turn: 4,
+        step: 2,
+        message: { source: { provider: 'deepseek-official' }, content: [], id: 'm' },
+        usage: { inputTokens: 42 },
+        stream: [
+          { type: 'chunk', time: 1100, chunk: { type: 'block-start', index: 0, blockType: 'reasoning' } },
+          { type: 'reasoning-chunks', time0: 1250, index: 0, dt: [], texts: ['Let'] },
+          { type: 'text-chunks', time0: 1900, index: 1, dt: [], texts: ['hi'] },
+        ],
+      },
+    }
+    const after = cacheMissDefinition.update!(ctx as any, { event } as any)
+    expect(after.firstTokenTime).toBe(1250)
+  })
+
+  it('keeps a chunk-derived first-token time instead of overwriting it from the stream', () => {
+    const ctx: any = { state: { turn: 4, step: 2, usage: undefined, missingCacheFields: false, provider: undefined, stepStartTime: 1000, firstTokenTime: 1200, missTime: null } }
+    const event = {
+      type: 'assistant/message',
+      seq: 9,
+      time: 3000,
+      data: { turn: 4, step: 2, usage: { inputTokens: 42 }, stream: [{ type: 'text-chunks', time0: 2500, index: 1 }] },
+    }
+    const after = cacheMissDefinition.update!(ctx, { event } as any)
+    expect(after.firstTokenTime).toBe(1200)
+  })
 })
 
 describe('cacheMissDefinition.buildViewNode', () => {
