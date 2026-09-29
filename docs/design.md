@@ -19,9 +19,15 @@ DSH 自带的 token/缓存统计条位于输入框下方,轮次繁多时难以�
 
 ## 判定口径
 
-以流中该 step 的 `usage` chunk 为准(`assistant/chunk` 事件携带的 `usage` 型
-StreamChunk,adapter 在终止 finish 之前发出,内含 `inputTokens` / `cacheReadTokens` /
-`cacheWriteTokens`)。无 `usage` chunk 的 provider 退回到 `assistant/message` 的 `usage`。
+以该 step 的 `usage` 为准,字段为 `inputTokens` / `cacheReadTokens` / `cacheWriteTokens`。
+两个事件方言都显式读取,不假设哪一个存在:
+
+- **流式方言**(0.1.x 核心):`assistant/chunk` 事件携带 `usage` 型 StreamChunk,
+  adapter 在终止 finish 之前发出,因此判 miss 无需等消息结束;
+- **结算方言**(0.2 起):核心不再发 `assistant/chunk`,usage 落在 `assistant/message`
+  上,同时把整段流式时间线折进该事件的 `stream` 字段。
+
+provider 在两种方言下都不回 cache 字段时的处理见下。
 
 `inputTokens` 是"未命中缓存的输入"(disjoint 口径),`cacheReadTokens` 是命中部分,
 缓存命中率 `hitRatio = cacheReadTokens / (inputTokens + cacheReadTokens)`。
@@ -40,8 +46,8 @@ cache 字段,插件无法区分「完全 miss」与「命中但不报明细」,�
 `re-billed` 只显示 `inputTokens`(未命中部分),即本次 miss 真正重新计费的输入;
 旁边再显示 `cached`(`cacheReadTokens`,命中部分),二者相加即本次 prefill 总量。
 
-由于数据取自流中的 usage chunk,判定在 usage 到达时即可完成,无需等待
-assistant 消息结束——这正是"在 miss 发生的时刻立即提示"。
+在流式方言下,判定在 usage chunk 到达时即可完成,黄线可在模型仍在流式输出时出现;
+在结算方言下,usage 随 `assistant/message` 到达,黄线在该条回复结算时出现。
 
 ## 展示内容
 
@@ -54,9 +60,11 @@ Cache miss after 3m idle: 182k tokens re-billed · 0.8k cached · ttft 2.1s ↑
 - `idle`:距上一轮结束的空闲时长,>= 60s 显示为分钟,否则为秒。
 - `re-billed`:该请求 `inputTokens`(未命中部分)的千分位缩写(k)。
 - `cached`:该请求 `cacheReadTokens`(命中部分)的千分位缩写(k),provider 未回报时不显示。
-- `ttft`:该条 assistant 首 token 时延(TTFT)= 首个非空 token delta 事件时间 -
-  `step/start` 事件时间,秒、一位小数,末尾加向上箭头示意重建 prefill 通常更慢;
-  边界缺失时不显示该段。
+- `ttft`:该条 assistant 首 token 时延(TTFT)= 首个 token 事件时间 - `step/start`
+  事件时间,秒、一位小数,末尾加向上箭头示意重建 prefill 通常更慢;边界缺失时不显示该段。
+  流式方言下取首个非空 delta 的事件时间;结算方言下取 `assistant/message.stream` 中
+  最早一条带 token 的记录(`reasoning-chunks` / `text-chunks` / `tool-call-chunks` 的
+  `time0`;结构性的 `chunk` 块标记不含 token,不算边界)。
 - 纯文本,无 emoji,不自动消失,刷新页面后随会话投影自然消失。
 
 当 provider 回 usage 但不回 `cacheReadTokens`/`cacheWriteTokens`,且从未出现过任何
@@ -71,14 +79,37 @@ provider 一次的更详细 warning(含 turn/step、provider、`inputTokens` 与
 
 使用 DSH 的 conversation-node 机制:
 
-- 注册 `ConversationNodeDefinition`,匹配 `step/start`(start)、`assistant/chunk`
-  与 `assistant/message`(update),key 为 `turn:step`。`usage` chunk 到达即判 miss,
-  满足判定时立即发布节点——黄线在模型流式输出尚未结束时即可出现。
+- 注册 `ConversationNodeDefinition`,匹配 `step/start`(start)、`assistant/chunk` 与
+  `assistant/message`(update),key 为 `turn:step`。满足判定时立即发布节点;
+  发布的时刻取决于该核心的事件方言(见"判定口径")。
 - 节点经 `conversation.chat.node` 的 keyed seat 渲染(独立 key,不占 `turnTail` 链)。
 - 因此与 `DSH-better-sidebar` 在 `turnTail` 的产物文件行互不冲突:
   本插件渲染在 step 内,产物行渲染在轮尾;二者位置不同、各自独立。
 
 依赖注入:只硬依赖 web 端必然存在的 `slots`(注册 keyed 渲染器)。Definition 的注册是 best-effort,并推迟到 `conversation.chat.node` 座位被声明时进行——该座位由 `ui-chat` 声明,而 `ui-chat` inject 了 `uiConversation`,因此此刻注册表必定 ACTIVE。探测用 `ctx.get('uiConversation')?.events ?? ctx.get('conversationEvents')`(0.1.2-rc.1 起为 `uiConversation.events`;旧核心为 `conversationEvents`)。之所以必须走 `ctx.get` 而非属性读取:loader 条目之间是兄弟节点,属性读取未 inject 的服务会抛 `cannot get property "<name>" without inject`,那会在 apply 期直接抛错(而非降级);`ctx.get` 读全局服务存储,找不到返回 undefined。找不到注册表时降级为 no-op 并打一条 console.warn,绝不 pending、绝不影响 dsh 启动。注册返回的 disposer 挂到本 fiber,卸载/热重载时移除,避免残留 Definition 导致下次 "already registered"。
+
+## 核心版本兼容
+
+浏览器半区只声明两件真实存在的东西:宿主提供的 `slots` 服务,以及请求码 `turn:step`
+的 session 事件。除此之外的一切(注册表服务名、Definition 契约细节、事件方言、
+快照字段位置)都按"存在则用、缺失则退"处理,不臆测、不静默改写。
+
+已实测的核心版本:
+
+- `0.1.2-rc.1`(web profile):流式方言,`uiConversation.events` 注册,顶层 `turnTimings`;
+- `0.2.0-rc.2`(desktop app):结算方言,`ConversationViewNode` 收敛为
+  `{key, kind, id, target, data}`(仍返回的 `anchorSeq` / `location` / `visibility`
+  供 0.1.x 使用,新核心忽略),`turnTimings` 移入快照的 `legacy` 投影,
+  且 `conversation.chat.node` 的 `cache-miss` seat 实测 active。
+
+客户端入口声明:核心 `0.1.5` 起宿主内置的是 `@deepseek-ai/dsh-client-modules`
+(`dsh-client-runtime` 在 npm 上止于 `0.1.1-rc.2`,已不再随宿主发布),因此
+`dsh.client.inject` 与 peer 都指向 `dsh-client-modules`;类型仍取自官方
+`@deepseek-ai/*` npm SDK 的 devDependencies。
+
+idle 时长读取 chat 快照的 `turnTimings`,顶层没有时退回 `legacy.turnTimings`;
+两者都拿不到时不猜一个空闲时长(显示 0s),但黄线照常出现——判定本身不依赖 idle。
+
 
 每次 miss 在浏览器控制台输出一行,带浏览器本地时区时间戳;渲染器用 ref 去重,
 每 `turn:step` 至多输出一次,不会因重复渲染而堆积。

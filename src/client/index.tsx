@@ -4,7 +4,10 @@ import type {} from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { Context } from '@deepseek-ai/cordis'
 import { cacheMissDefinition, type CacheMissNodeData } from './cache-miss-node'
-import { deriveTurnTimingFacts, formatLocalTime, getLineStatus, hasCacheFields, ttftMs } from './logic'
+import {
+  deriveTurnTimingFacts, formatLocalTime, getLineStatus, hasCacheFields, resolveTurnTimings, ttftMs,
+  type TurnTiming,
+} from './logic'
 
 /** Yellow cache-miss single line rendered under the turn's first assistant. */
 const LINE_STYLE = {
@@ -26,7 +29,7 @@ type UseConversation<T> = (selector: (snapshot: any) => T) => T
 /** Minimal props this renderer actually reads (node data + session hook). */
 interface CacheMissLineProps {
   node?: { data?: CacheMissNodeData }
-  useSession?: UseConversation<Map<number, { startTime?: number; endTime?: number }> | undefined>
+  useSession?: UseConversation<ReadonlyMap<number, TurnTiming> | undefined>
 }
 
 /**
@@ -95,7 +98,7 @@ function CacheMissLine(props: CacheMissLineProps): React.ReactElement | null {
   }, [props.node?.data?.turn, props.node?.data?.step, props.node?.data?.missTime, props.node?.data?.usage?.inputTokens, props.node?.data?.usage?.cacheReadTokens, props.node?.data?.usage?.cacheWriteTokens, props.node?.data?.missingCacheFields, props.node?.data?.provider])
 
   if (data === undefined) return null
-  const turnTimings = props.useSession?.((state) => state?.turnTimings)
+  const turnTimings = props.useSession?.((state) => resolveTurnTimings(state))
   const timing = deriveTurnTimingFacts(data.turn, turnTimings)
   const status = getLineStatus({
     usage: data.usage,

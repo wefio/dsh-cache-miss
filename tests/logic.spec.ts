@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
+  firstTokenTimeFromStream,
   formatLine,
   formatLocalTime,
   formatUnconfirmedLine,
   getLineStatus,
   isCacheAccountingUnavailable,
   isCacheMiss,
+  resolveTurnTimings,
   ttftMs,
   UNCONFIRMED_LINE,
   type CacheUsage,
@@ -201,5 +203,58 @@ describe('formatLocalTime', () => {
     const date = new Date(2026, 7, 15, 18, 30, 5) // Aug 15 2026 18:30:05 local
     const formatted = formatLocalTime(date.getTime())
     expect(formatted).toBe(date.toLocaleString())
+  })
+})
+
+describe('firstTokenTimeFromStream', () => {
+  it('takes the earliest token-bearing record instant', () => {
+    const stream = [
+      { type: 'chunk', time: 1000, chunk: { type: 'block-start', index: 0, blockType: 'reasoning' } },
+      { type: 'reasoning-chunks', time0: 1400, index: 0, dt: [], texts: ['Let'] },
+      { type: 'text-chunks', time0: 1600, index: 1, dt: [], texts: ['hi'] },
+    ]
+    expect(firstTokenTimeFromStream(stream)).toBe(1400)
+  })
+
+  it('ignores structural chunk markers that carry no tokens', () => {
+    const stream = [{ type: 'chunk', time: 1000, chunk: { type: 'block-start', index: 0 } }]
+    expect(firstTokenTimeFromStream(stream)).toBeNull()
+  })
+
+  it('accepts a single-instant record through its time field', () => {
+    expect(firstTokenTimeFromStream([{ type: 'tool-call-chunks', time: 2200, index: 1 }])).toBe(2200)
+  })
+
+  it('is null for payloads with no usable record', () => {
+    expect(firstTokenTimeFromStream(undefined)).toBeNull()
+    expect(firstTokenTimeFromStream(null)).toBeNull()
+    expect(firstTokenTimeFromStream([])).toBeNull()
+    expect(firstTokenTimeFromStream({})).toBeNull()
+    expect(firstTokenTimeFromStream([null, 'x', { type: 'reasoning-chunks' }])).toBeNull()
+  })
+})
+
+describe('resolveTurnTimings', () => {
+  const timings = new Map([[1, { startTime: 1000, endTime: 2000 }]])
+
+  it('reads the older top-level snapshot field', () => {
+    expect(resolveTurnTimings({ turnTimings: timings })).toBe(timings)
+  })
+
+  it('falls back to the legacy projection newer cores use', () => {
+    expect(resolveTurnTimings({ nodes: {}, legacy: { turnTimings: timings } })).toBe(timings)
+  })
+
+  it('prefers the top-level field when both exist', () => {
+    const other = new Map([[2, { startTime: 5000 }]])
+    expect(resolveTurnTimings({ turnTimings: timings, legacy: { turnTimings: other } })).toBe(timings)
+  })
+
+  it('is undefined when no map is exposed, without guessing', () => {
+    expect(resolveTurnTimings(undefined)).toBeUndefined()
+    expect(resolveTurnTimings(null)).toBeUndefined()
+    expect(resolveTurnTimings({})).toBeUndefined()
+    expect(resolveTurnTimings({ turnTimings: [], legacy: {} })).toBeUndefined()
+    expect(resolveTurnTimings({ legacy: null })).toBeUndefined()
   })
 })

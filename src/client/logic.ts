@@ -114,6 +114,45 @@ export function ttftMs(
   return ms > 0 ? ms : 0
 }
 
+/** One record of the stream timeline a settled assistant message carries. */
+interface StreamRecord {
+  readonly type?: unknown
+  readonly time?: unknown
+  readonly time0?: unknown
+}
+
+/** Stream record types that carry produced tokens (reasoning, text, tool-call
+ * arguments). Structural `chunk` markers (`block-start`, `block-end`, ...) carry
+ * no tokens and must not be read as the first-token boundary. */
+const TOKEN_STREAM_RECORDS = new Set(['reasoning-chunks', 'text-chunks', 'tool-call-chunks'])
+
+/**
+ * First-token instant from a settled assistant message's stream timeline, or
+ * null when the payload carries no token-bearing record.
+ *
+ * Cores that no longer emit `assistant/chunk` events roll the streaming
+ * timeline into the settled message instead: each token-bearing record carries
+ * the instant of its first delta as `time0` (later deltas are delta-encoded
+ * inside `dt`). The earliest such instant is this request's first-token
+ * boundary, which is what {@link ttftMs} needs.
+ *
+ * @param stream - a message's `stream` payload, read structurally.
+ */
+export function firstTokenTimeFromStream(stream: unknown): number | null {
+  if (!Array.isArray(stream)) return null
+  let earliest: number | null = null
+  for (const record of stream as readonly StreamRecord[]) {
+    if (record === null || typeof record !== 'object') continue
+    if (typeof record.type !== 'string' || !TOKEN_STREAM_RECORDS.has(record.type)) continue
+    // `time0` is the first delta of the record; `time` is the fallback used by
+    // records that carry a single instant instead of a delta series.
+    const at = typeof record.time0 === 'number' ? record.time0 : record.time
+    if (typeof at !== 'number' || !Number.isFinite(at)) continue
+    if (earliest === null || at < earliest) earliest = at
+  }
+  return earliest
+}
+
 /**
  * Format a Unix-epoch-ms instant in the browser's own locale and time zone.
  * @param epochMs - session event time (Unix epoch milliseconds).
@@ -151,6 +190,33 @@ export function formatUnconfirmedLine(): string {
   return UNCONFIRMED_LINE
 }
 
+/** One turn's timing as the conversation records it. */
+export interface TurnTiming {
+  readonly startTime?: number
+  readonly endTime?: number
+}
+
+/**
+ * Read a chat session snapshot's turn-timing map, whichever place it exposes it.
+ *
+ * Older cores publish `turnTimings` as a top-level snapshot field. Cores from
+ * 0.2 keep it in the snapshot's `legacy` projection, which carries the same
+ * fields for consumers written against the older shape. Reading both keeps the
+ * idle gap available across the rename; an unavailable map yields undefined, and
+ * the caller falls back to "no measurable idle" rather than guessing one.
+ *
+ * @param snapshot - the session snapshot delivered to a seat hook, structurally.
+ */
+export function resolveTurnTimings(snapshot: unknown): ReadonlyMap<number, TurnTiming> | undefined {
+  if (snapshot === null || typeof snapshot !== 'object') return undefined
+  const topLevel = (snapshot as { turnTimings?: unknown }).turnTimings
+  if (topLevel instanceof Map) return topLevel as ReadonlyMap<number, TurnTiming>
+  const legacy = (snapshot as { legacy?: unknown }).legacy
+  if (legacy === null || typeof legacy !== 'object') return undefined
+  const nested = (legacy as { turnTimings?: unknown }).turnTimings
+  return nested instanceof Map ? (nested as ReadonlyMap<number, TurnTiming>) : undefined
+}
+
 /** Facts about the turn's timing, resolved from the conversation snapshot. */
 export interface TurnTimingFacts {
   /** Whether any prior turn exists. Turn numbers are global and monotonic
@@ -171,7 +237,7 @@ export interface TurnTimingFacts {
  */
 export function deriveTurnTimingFacts(
   turn: number,
-  turnTimings: ReadonlyMap<number, { readonly startTime?: number; readonly endTime?: number }> | undefined,
+  turnTimings: ReadonlyMap<number, TurnTiming> | undefined,
 ): TurnTimingFacts {
   const hasPriorTurn = turn > 1
   if (!(turnTimings instanceof Map)) return { hasPriorTurn, idleMs: 0 }
