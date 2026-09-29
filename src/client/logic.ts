@@ -197,6 +197,64 @@ export interface TurnTiming {
 }
 
 /**
+ * Opt-in placement debug switch.
+ *
+ * Set `localStorage['dsh-cache-miss:debug'] = '1'` and reload to force the notice
+ * line on every Turn, cache hits included. The point is maintenance: the line is
+ * placed against chat-view markup (`data-turn-process`) rather than a published
+ * slot contract, so after a core update it must be possible to see where the line
+ * actually lands without waiting for a real cache miss. Off by default — a normal
+ * page load never shows a forced line.
+ */
+export const DEBUG_FLAG = 'dsh-cache-miss:debug'
+
+/**
+ * Whether the opt-in debug mode is enabled.
+ * @param storage - Storage-like reader, defaulting to the page's `localStorage`.
+ *   Injectable so callers and tests do not depend on a global.
+ */
+/** Optional local override for the debug switch (unused in released builds). */
+const DEBUG_OVERRIDE: string | null = null
+
+export function isDebugEnabled(storage?: { getItem(key: string): string | null } | null): boolean {
+  let reader = storage
+  if (reader === undefined) {
+    try {
+      reader = typeof localStorage === 'undefined' ? null : localStorage
+    } catch {
+      reader = null
+    }
+  }
+  if (DEBUG_OVERRIDE !== null && typeof window !== 'undefined') return DEBUG_OVERRIDE === '1'
+  if (reader === null || reader === undefined) return false
+  try {
+    return reader.getItem(DEBUG_FLAG) === '1'
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Selector for one closed Turn's process summary row — the disclosure toggle
+ * ("已完成，用时 …") the chat view renders above a Turn's process content.
+ *
+ * The notice anchors there because cores from 0.2 fold a completed Turn's
+ * process content into that disclosure, and the chat view treats every node kind
+ * outside its own `TURN_PROCESS_INDEPENDENT_KINDS` set — which a plugin cannot
+ * join — as folded content. The toggle itself stays visible while folded, so a
+ * line beside it survives the fold and still sits at the Turn head.
+ *
+ * `data-turn-process` belongs to the shipped chat view rather than to a
+ * published slot contract, so callers must treat a missing anchor as "render
+ * inline instead", never as a failure.
+ *
+ * @param turn - Turn number.
+ */
+export function turnProcessSelector(turn: number): string {
+  return `[data-turn-process="${turn}"]`
+}
+
+/**
  * Read a chat session snapshot's turn-timing map, whichever place it exposes it.
  *
  * Older cores publish `turnTimings` as a top-level snapshot field. Cores from

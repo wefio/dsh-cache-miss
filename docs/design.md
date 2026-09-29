@@ -86,6 +86,56 @@ provider 一次的更详细 warning(含 turn/step、provider、`inputTokens` 与
 - 因此与 `DSH-better-sidebar` 在 `turnTail` 的产物文件行互不冲突:
   本插件渲染在 step 内,产物行渲染在轮尾;二者位置不同、各自独立。
 
+落点在 0.2 上的调整(轮首的"特征位置"):0.2 把已关闭轮次的过程内容折进一个
+disclosure,而 chat 视图只豁免它自己那份写死的 kind 集合
+(`TURN_PROCESS_INDEPENDENT_KINDS`),插件无法加入;被折叠内容里的节点会被加上
+`hidden`,于是黄线虽然在 DOM 里(样式、文本、ttft 全部正确),画面上却看不到。
+因此渲染分两段:
+
+- **摘要行存在时**(已完成轮):把同一行插到该轮的**过程摘要行**(`已完成、用时 …` 那一行,
+  即折叠开关本身,带 `data-turn-process="<轮号>"`)**之后**,故折叠状态下仍然可见;
+- **摘要行不存在时**(进行中的轮):渲染在 step 流内,此时折叠区被强制展开,当场可见,
+  即"miss 那一刻"的位置。
+
+放置**不跟随折叠开关**:实测两者在 0.2 的布局里落在同一处(摘要行就是该轮的第一个元素),
+跟随切换只会带来无收益的 DOM 抖动;而"跟随折叠"一旦做错(判成"已展开"却仍插到摘要行,
+或反之)反而会出问题。
+
+插入用平台 DOM(本插件是普通页面模块,不是受限沙箱),节点带
+`data-dsh-cache-miss` 便于自识别,`MutationObserver` 在 flow item 被重建时重新插入。
+查找锚点**必须限定在"本节点所属的那个 Conversation 实例"内**(取渲染节点自身的
+`closest('[class*="_centerCol"]')`,即 ui-layout 的中央内容列;该类名的模块哈希前缀随
+构建变化,故匹配稳定的 `_centerCol` 后缀,并以本节点 flow item 的父级兜底)——一个会话
+可以同时挂载多个 Conversation(主体 + 侧栏聊天页签),它们各自渲染一份同样的 flow 与
+同名属性;实测 0.2.0-rc.2 上就有 2 个实例,若按整个 document 取"最后一个"摘要行,会把线
+插到别的实例、甚至应用框架层(`BynINW_frame`)。
+
+`data-turn-process` 是 chat 视图的内部属性而非公开插槽契约:摘要行找不到时退回 step
+内联渲染(锚点只是可见性优化,绝不是必需条件);而"**被折叠藏住、又找不到摘要行**"是
+唯一会让提示静默消失的状态,此时额外打一条 console.warn(每 step 一次,并带上各容器里
+的轮号,便于一次定位),让核心改版可被发现。已实测(0.2.0-rc.2,用位置自检开关强制出线):
+turn 32–38 各生成一条,稳定落在该实例的消息流内、摘要行正下方,折叠与展开两种状态下
+位置一致且均可见。
+
+### 位置自检开关(默认关闭)
+
+因为落点依赖的是 chat 视图的**内部**标记而非公开插槽契约,核心更新后必须能**不依赖
+真实 miss** 就确认落点。因此在浏览器控制台执行:
+
+```js
+localStorage.setItem('dsh-cache-miss:debug', '1'); location.reload()
+```
+
+之后**每一轮**都会显示一条带 `[debug]` 前缀的强制行(命中轮也显示),因此可以直接
+看到它究竟落在哪。关闭:
+
+```js
+localStorage.removeItem('dsh-cache-miss:debug'); location.reload()
+```
+
+调试行永远带 `[debug] 强制显示(本轮无 miss)` 字样,不会伪装成真实提示,也不会写入
+控制台的 miss 日志;默认(未设置该键)对使用者完全不可见。
+
 依赖注入:只硬依赖 web 端必然存在的 `slots`(注册 keyed 渲染器)。Definition 的注册是 best-effort,并推迟到 `conversation.chat.node` 座位被声明时进行——该座位由 `ui-chat` 声明,而 `ui-chat` inject 了 `uiConversation`,因此此刻注册表必定 ACTIVE。探测用 `ctx.get('uiConversation')?.events ?? ctx.get('conversationEvents')`(0.1.2-rc.1 起为 `uiConversation.events`;旧核心为 `conversationEvents`)。之所以必须走 `ctx.get` 而非属性读取:loader 条目之间是兄弟节点,属性读取未 inject 的服务会抛 `cannot get property "<name>" without inject`,那会在 apply 期直接抛错(而非降级);`ctx.get` 读全局服务存储,找不到返回 undefined。找不到注册表时降级为 no-op 并打一条 console.warn,绝不 pending、绝不影响 dsh 启动。注册返回的 disposer 挂到本 fiber,卸载/热重载时移除,避免残留 Definition 导致下次 "already registered"。
 
 ## 核心版本兼容

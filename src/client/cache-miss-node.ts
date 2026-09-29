@@ -2,7 +2,7 @@ import type {
   ChatConversationViewNode, ConversationNodeContext, ConversationNodeDefinition,
 } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
-import { firstTokenTimeFromStream, isCacheAccountingUnavailable, isCacheMiss, type CacheUsage } from './logic'
+import { firstTokenTimeFromStream, isCacheAccountingUnavailable, isCacheMiss, isDebugEnabled, type CacheUsage } from './logic'
 
 declare module '@deepseek-ai/dsh-client-ui-conversation/client' {
   interface ChatNodeDataMap {
@@ -184,7 +184,11 @@ export const cacheMissDefinition: ConversationNodeDefinition<CacheMissState> = {
     const state = context.state
     if (state === undefined) return null
     const isMiss = isCacheMiss(state.usage)
-    if (!isMiss && !state.missingCacheFields) return null
+    // Debug mode publishes on every Turn's first step so the placement of the
+    // line can be checked without waiting for a real miss; the renderer labels it
+    // as forced. One line per Turn keeps a placement check readable.
+    const forced = isDebugEnabled() && state.step === 1
+    if (!isMiss && !state.missingCacheFields && !forced) return null
     return {
       key: context.key,
       kind: 'cache-miss',

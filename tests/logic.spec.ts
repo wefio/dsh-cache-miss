@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  DEBUG_FLAG,
   firstTokenTimeFromStream,
   formatLine,
   formatLocalTime,
@@ -7,7 +8,9 @@ import {
   getLineStatus,
   isCacheAccountingUnavailable,
   isCacheMiss,
+  isDebugEnabled,
   resolveTurnTimings,
+  turnProcessSelector,
   ttftMs,
   UNCONFIRMED_LINE,
   type CacheUsage,
@@ -256,5 +259,31 @@ describe('resolveTurnTimings', () => {
     expect(resolveTurnTimings({})).toBeUndefined()
     expect(resolveTurnTimings({ turnTimings: [], legacy: {} })).toBeUndefined()
     expect(resolveTurnTimings({ legacy: null })).toBeUndefined()
+  })
+})
+
+describe('turnProcessSelector', () => {
+  it('addresses one Turn\'s process summary row by its attribute', () => {
+    expect(turnProcessSelector(8)).toBe('[data-turn-process="8"]')
+  })
+
+  it('keeps distinct Turns distinct', () => {
+    expect(turnProcessSelector(1)).not.toBe(turnProcessSelector(11))
+  })
+})
+
+describe('isDebugEnabled', () => {
+  const storageWith = (value: string | null) => ({ getItem: (key: string) => (key === DEBUG_FLAG ? value : null) })
+
+  it('is on only for the documented opt-in value', () => {
+    expect(isDebugEnabled(storageWith('1'))).toBe(true)
+    expect(isDebugEnabled(storageWith('0'))).toBe(false)
+    expect(isDebugEnabled(storageWith('true'))).toBe(false)
+    expect(isDebugEnabled(storageWith(null))).toBe(false)
+  })
+
+  it('is off without a storage and when reading throws', () => {
+    expect(isDebugEnabled(null)).toBe(false)
+    expect(isDebugEnabled({ getItem: () => { throw new Error('blocked') } })).toBe(false)
   })
 })
