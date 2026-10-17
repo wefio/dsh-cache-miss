@@ -4,6 +4,7 @@ import {
   firstTokenTimeFromStream,
   formatLine,
   formatLocalTime,
+  formatDebugLine,
   formatUnconfirmedLine,
   getLineStatus,
   isCacheAccountingUnavailable,
@@ -86,6 +87,24 @@ describe('isCacheAccountingUnavailable', () => {
 describe('formatUnconfirmedLine', () => {
   it('returns the fixed unconfirmed-provider notice', () => {
     expect(formatUnconfirmedLine()).toBe(UNCONFIRMED_LINE)
+  })
+})
+
+describe('formatDebugLine', () => {
+  it('names itself as forced and reports the measured facts', () => {
+    const line = formatDebugLine({ turn: 43, step: 1, idleMs: 3 * 60_000, hasTimings: true, ttftMs: 2_100 })
+    expect(line).toBe('[debug] 强制显示（本轮无 miss）· turn 43 step 1 · idle 3m · ttft 2.1s')
+  })
+
+  it('says the timings are unavailable instead of claiming a 0s idle', () => {
+    const line = formatDebugLine({ turn: 7, step: 2, idleMs: 0, hasTimings: false, ttftMs: 0 })
+    expect(line).toContain('idle unavailable (no turn timings)')
+    expect(line).not.toContain('0s')
+  })
+
+  it('omits TTFT when the step recorded none', () => {
+    const line = formatDebugLine({ turn: 7, step: 2, idleMs: 30_000, hasTimings: true, ttftMs: 0 })
+    expect(line).toBe('[debug] 强制显示（本轮无 miss）· turn 7 step 2 · idle 30s')
   })
 })
 

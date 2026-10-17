@@ -5,8 +5,8 @@ import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { Context } from '@deepseek-ai/cordis'
 import { cacheMissDefinition, type CacheMissNodeData } from './cache-miss-node'
 import {
-  deriveTurnTimingFacts, formatLocalTime, getLineStatus, hasCacheFields, isDebugEnabled, resolveTurnTimings,
-  turnProcessSelector, ttftMs,
+  deriveTurnTimingFacts, formatDebugLine, formatLocalTime, getLineStatus, hasCacheFields, isDebugEnabled,
+  resolveTurnTimings, turnProcessSelector, ttftMs,
   type LineStatus,
   type TurnTiming,
 } from './logic'
@@ -216,13 +216,22 @@ function useTurnProcessAnchor(
   return anchored
 }
 
-/** The conversation-snapshot selector hook the keyed seat injects. */
-type UseConversation<T> = (selector: (snapshot: any) => T) => T
+/** A snapshot-selector hook injected by the keyed chat seat. */
+type SnapshotSelector<T> = (selector: (snapshot: any) => T) => T
 
-/** Minimal props this renderer actually reads (node data + session hook). */
+/** Minimal props this renderer actually reads (node data + snapshot hooks). */
 interface CacheMissLineProps {
   node?: { data?: CacheMissNodeData }
-  useSession?: UseConversation<ReadonlyMap<number, TurnTiming> | undefined>
+  /**
+   * ChatSnapshot selector. Cores from 0.2 inject it into the keyed seat; the
+   * chat view keeps turn timings in that snapshot's `legacy` projection.
+   */
+  useChat?: SnapshotSelector<ReadonlyMap<number, TurnTiming> | undefined>
+  /**
+   * Session-snapshot selector. Cores before 0.2 delivered the turn timings on
+   * this snapshot; kept as the fallback source when `useChat` is absent.
+   */
+  useSession?: SnapshotSelector<ReadonlyMap<number, TurnTiming> | undefined>
 }
 
 /**
@@ -273,22 +282,39 @@ function CacheMissLine(props: CacheMissLineProps): React.ReactElement | null {
 
   // Every hook runs before the first early return: `data` is normally present for
   // a mounted node, but a transient undefined must not change the hook count.
-  const turnTimings = props.useSession?.((state) => resolveTurnTimings(state))
+  // Both snapshot hooks are read, each selecting only its timing map, because
+  // which snapshot carries the timings is a core-version detail: cores from 0.2
+  // keep them in the chat snapshot's `legacy` projection, older cores put them on
+  // the session snapshot. Resolving only the session snapshot left 0.2 reporting
+  // `0s idle` for every line.
+  const chatTurnTimings = props.useChat?.((snapshot) => resolveTurnTimings(snapshot))
+  const sessionTurnTimings = props.useSession?.((snapshot) => resolveTurnTimings(snapshot))
+  const turnTimings = chatTurnTimings ?? sessionTurnTimings
   const timing = data === undefined
     ? { hasPriorTurn: false, idleMs: 0 }
     : deriveTurnTimingFacts(data.turn, turnTimings)
+  const stepTtft = data === undefined ? 0 : ttftMs(data.stepStartTime, data.firstTokenTime)
   const decided: LineStatus = data === undefined ? { kind: 'hidden' } : getLineStatus({
     usage: data.usage,
     idleMs: timing.idleMs,
-    ttftMs: ttftMs(data.stepStartTime, data.firstTokenTime),
+    ttftMs: stepTtft,
     hasPriorTurn: timing.hasPriorTurn,
     hasCacheEvidence,
   })
   // Debug mode forces a labelled line on hits too, so the placement can be checked
-  // without waiting for a real miss (see DEBUG_FLAG). It always says so, never
-  // masquerading as a genuine notice.
+  // without waiting for a real miss (see DEBUG_FLAG). It always says so, and it
+  // reports the timing facts that a real line only shows on a miss.
   const status: LineStatus = decided.kind === 'hidden' && data !== undefined && isDebugEnabled()
-    ? { kind: 'show', line: `[debug] 强制显示（本轮无 miss）· turn ${data.turn} step ${data.step}` }
+    ? {
+        kind: 'show',
+        line: formatDebugLine({
+          turn: data.turn,
+          step: data.step,
+          idleMs: timing.idleMs,
+          hasTimings: turnTimings !== undefined,
+          ttftMs: stepTtft,
+        }),
+      }
     : decided
   // A closed Turn keeps this line beside its process summary row, which survives
   // the fold; a running Turn has no such row and renders in the step flow, where
@@ -417,7 +443,7 @@ function registerCacheMissDefinition(
 /** Build marker written to `<html>` while debug mode is on, so a page can prove
  * which bundle it is running: the client bundle loads only on page load, and a
  * stale one otherwise looks identical to the current one. */
-const DEBUG_BUILD_TAG = 'release-1'
+const DEBUG_BUILD_TAG = 'release-1.9'
 
 /** Register the cache-miss Definition (best-effort) and its keyed chat-node renderer. */
 export function apply(ctx: Context): void {

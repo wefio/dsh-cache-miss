@@ -275,6 +275,37 @@ export function resolveTurnTimings(snapshot: unknown): ReadonlyMap<number, TurnT
   return nested instanceof Map ? (nested as ReadonlyMap<number, TurnTiming>) : undefined
 }
 
+/** Inputs the opt-in debug line reports. */
+export interface DebugLineInput {
+  /** Turn number. */
+  turn: number
+  /** Step number inside that Turn. */
+  step: number
+  /** Idle gap the renderer measured, in ms. */
+  idleMs: number
+  /** Whether any injected snapshot carried a turn-timing map at all. */
+  hasTimings: boolean
+  /** First-token latency in ms; 0 when the step recorded none. */
+  ttftMs: number
+}
+
+/**
+ * Render the opt-in debug line.
+ *
+ * It names itself as forced — never masquerading as a genuine notice — then
+ * reports the facts a normal line cannot show: the idle gap it measured, whether
+ * a turn-timing map was found in any snapshot, and TTFT when the step recorded
+ * one. That makes a core update checkable in one glance: a missing timings
+ * source reads `idle unavailable` instead of a plausible-looking `0s`.
+ *
+ * @param input - turn/step identity plus the resolved timing facts.
+ */
+export function formatDebugLine(input: DebugLineInput): string {
+  const idle = input.hasTimings ? `idle ${formatIdle(input.idleMs)}` : 'idle unavailable (no turn timings)'
+  const ttft = input.ttftMs > 0 ? ` · ttft ${formatTtft(input.ttftMs)}` : ''
+  return `[debug] 强制显示（本轮无 miss）· turn ${input.turn} step ${input.step} · ${idle}${ttft}`
+}
+
 /** Facts about the turn's timing, resolved from the conversation snapshot. */
 export interface TurnTimingFacts {
   /** Whether any prior turn exists. Turn numbers are global and monotonic

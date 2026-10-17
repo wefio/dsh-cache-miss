@@ -127,7 +127,10 @@ localStorage.setItem('dsh-cache-miss:debug', '1'); location.reload()
 ```
 
 之后**每一轮**都会显示一条带 `[debug]` 前缀的强制行(命中轮也显示),因此可以直接
-看到它究竟落在哪。关闭:
+看到它究竟落在哪。调试行还带上本轮测得的时间事实,例如
+`[debug] 强制显示(本轮无 miss)· turn 43 step 1 · idle 25455m · ttft 1.6s`;
+快照里找不到计时表时写 `idle unavailable (no turn timings)`——这样核心再次改动快照来源时,
+一眼就能看出是"拿不到"而不是真的空闲了 0 秒。关闭:
 
 ```js
 localStorage.removeItem('dsh-cache-miss:debug'); location.reload()
@@ -151,14 +154,20 @@ localStorage.removeItem('dsh-cache-miss:debug'); location.reload()
   `{key, kind, id, target, data}`(仍返回的 `anchorSeq` / `location` / `visibility`
   供 0.1.x 使用,新核心忽略),`turnTimings` 移入快照的 `legacy` 投影,
   且 `conversation.chat.node` 的 `cache-miss` seat 实测 active。
+- `0.2.1-rc.1`(desktop app):上述契约不变(`uiConversation.events`、`data-turn-process`
+  摘要行、`_centerCol`、结算方言均实测仍在,黄线实测渲染成功)。唯一差异在快照来源:
+  chat 快照由座位以 `useChat` 注入,`useSession` 拿到的是另一份 session 快照(无
+  `turnTimings`),所以两个 hook 都读、按快照形状取—只读 `useSession` 会让每行都显示
+  `0s idle`。
 
 客户端入口声明:核心 `0.1.5` 起宿主内置的是 `@deepseek-ai/dsh-client-modules`
 (`dsh-client-runtime` 在 npm 上止于 `0.1.1-rc.2`,已不再随宿主发布),因此
 `dsh.client.inject` 与 peer 都指向 `dsh-client-modules`;类型仍取自官方
 `@deepseek-ai/*` npm SDK 的 devDependencies。
 
-idle 时长读取 chat 快照的 `turnTimings`,顶层没有时退回 `legacy.turnTimings`;
-两者都拿不到时不猜一个空闲时长(显示 0s),但黄线照常出现——判定本身不依赖 idle。
+idle 时长按快照形状取:先读 chat 快照的 `turnTimings`(顶层),没有再读它的
+`legacy.turnTimings`,仍未命中再退回 session 快照(0.2 之前的核心把 timings 放在这里);
+都拿不到时不猜一个空闲时长(显示 0s),但黄线照常出现——判定本身不依赖 idle。
 
 
 每次 miss 在浏览器控制台输出一行,带浏览器本地时区时间戳;渲染器用 ref 去重,
