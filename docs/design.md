@@ -55,12 +55,26 @@ cache 字段,插件无法区分「完全 miss」与「命中但不报明细」,�
 轮首第一条 assistant 回复正下方,渲染一条黄色等宽单行,形如:
 
 ```
-Cache miss after 3m idle: 182k tokens re-billed · 0.8k cached · ttft 2.1s ↑
+Cache miss after 3m idle · 182k tokens re-billed (turn ~$0.027) · 0.8k cached · ttft 2.1s ↑ · (tools changed) · session used (~$2.90)
 ```
 
 - `idle`:距上一轮结束的空闲时长,>= 60s 显示为分钟,否则为秒。
 - `re-billed`:该请求 `inputTokens`(未命中部分)的千分位缩写(k)。
+- `(turn ~$…)` / `(step ~$…)`:被重建的那部分的近似金额,沿用官方术语。miss 发生在轮首
+  请求 → 整段上下文被重建,标 `turn`;发生在轮中某步 → 只有该步改动的前缀被重建,标 `step`;
+  同一轮两者都重建过 → 直接给合计 `(~$…)`,不并列两个词让读者自己加。金额只算
+  **prompt 部分**(未命中输入 + 命中的缓存读),不含 output——本插件关心的是缓存成本,
+  各层级同口径才可比。`~` 明示估算,`$` 即 models.dev 的美元单价。
 - `cached`:该请求 `cacheReadTokens`(命中部分)的千分位缩写(k),provider 未回报时不显示。
+- `(system prompt changed)` / `(tools changed)`:核心对本次请求的**前缀变更分类**,写成人话而不是
+  照抄枚举名——行的目的是说"为什么重算",只写 `system` / `tools` 会读成一个 token 桶。系统提示和
+  工具目录都属于前缀,任一处变了就从变化点往后全部失效,所以这是 miss 最常见的原因。
+  分类来自核心,插件不做二次推断(理由见「前缀变更检测」)。
+- `(config changed)`:同一份 inspector 结果里的 `config` 变了(provider 切换、reasoningEffort 等)。
+  配置不同就是不同的缓存命名空间,整段 prompt 都会重算;核心的分类只覆盖 system/tools,
+  所以这一段由插件在**同一份规范化 config** 上做等值比较补上,可与分类叠加:
+  `(system prompt + config changed)`。
+- `session used (~$…)`:会话已用量(已载入窗口口径的近似金额);`used` 指明这是累计花费而不是本次。
 - `ttft`:该条 assistant 首 token 时延(TTFT)= 首个 token 事件时间 - `step/start`
   事件时间,秒、一位小数,末尾加向上箭头示意重建 prefill 通常更慢;边界缺失时不显示该段。
   流式方言下取首个非空 delta 的事件时间;结算方言下取 `assistant/message.stream` 中
@@ -70,6 +84,9 @@ Cache miss after 3m idle: 182k tokens re-billed · 0.8k cached · ttft 2.1s ↑
   重试、压缩等)时,后面的 step 同样会判为 miss。它们也各出一条,文案为
   `Cache miss at step N: …`:轮级 `idle`(距上一轮结束)对轮中事件没有意义,改用 step 号
   定位。同一轮的多条提示按 step 升序紧贴该轮的过程摘要行排列。
+- **step / turn / session 三级就是段**:不做表格。重建金额紧跟在 re-billed 后面,
+  `session` 追加为末尾一段,取自已载入的 assistant 记录(`legacy.nodes`)按当前模型单价
+  求和——"已载入窗口"口径,不是逐笔账单。
 - 纯文本,无 emoji,不自动消失,刷新页面后随会话投影自然消失。
 
 当 provider 回 usage 但不回 `cacheReadTokens`/`cacheWriteTokens`,且从未出现过任何
@@ -79,6 +96,65 @@ cache 字段时,插件无法区分「完全 miss」与「命中但不报明细�
 provider 一次的更详细 warning(含 turn/step、provider、`inputTokens` 与缺失字段说明)。
 一旦该 provider 出现过任一 cache 字段,后续无字段的请求按完全 miss 正常显示黄线。
 不做 TTFT 启发式兜底:用户间隔可能远超 TTFT 阈值,无法可靠区分 cache miss 与网络/负载慢。
+
+## 前缀变更检测
+
+DeepSeek 按前缀命中缓存:系统提示或**工具目录**任一处变了,变化点之后的 token 全部按 miss 计费。
+0.2 起的核心已经把这件事算好了(只是目前只喂给"轨迹"视图):每个请求的 `request/header` 事件经
+`uiConversation.inspectRequestPrompt(previous, event, system)` 规范化成 `{ config, system, tools }`,
+并直接给出 `change.kind`(`system` / `tools` / `system-and-tools`)。
+
+插件只**转述这个结论**,不自己再算一遍:
+
+- Definition `cache-miss-system`(`target: chat`,不发布节点):`match` 系统消息与 surface 替换事件,
+  用 `uiConversation.inspectSystemPrompt` 保留"当前生效的系统提示"——header inspector 需要它才
+  分得清 system 与 tools;
+- Definition `cache-miss-prefix`:只 `match` `request/header`,用 `reader.previous(...)` 取上一个
+  请求快照与上一步的系统提示,调上面的 inspector;`change.kind` 直接写进模块级 map
+  (键 `turn:step`,上限 500 条),渲染层按自己的 `turn`/`step` 取用,拼成 `(~tools)` 这类段。
+  同时用 inspector 返回的规范化 `config` 与上一份做等值比较(递归排序键后再比 JSON),
+  变了就在标签里补 `config`——核心的分类不覆盖这一项,而 provider 切换(实测
+  `deepseek-official` ↔ `deepseek-account`)会直接换掉缓存命名空间,整段 prompt 重算。
+  比较的仍然是同一份 inspector 结果,没有引入新的核心结构。
+
+为什么不做工具级 diff:那需要自己按 name + `description`/`parameters` 比较两份工具 schema,
+等于把插件绑死在核心的 `ToolSchema` 形状和 inspector 的返回结构上。核心一改,插件就炸;
+而"到底是 tools 变了还是 system 变了"这个信息核心本来就已经算好、稳定、且足够解释一次 miss。
+少借一点核心内部结构,就少一个会崩的地方。
+
+已知边界:map 以 `turn:step` 为键,同页打开两个**不同会话**且轮号撞车时,这段文字可能张冠李戴
+(极低概率,只影响这一个词);旧核心上若没有这两个 inspector,插件自动不注册对应 Definition,
+行里没有这一段——其余功能不受影响。
+## 计价口径
+
+价格取自 [models.dev](https://models.dev/api.json) 的 `deepseek` provider。随包提交的
+`src/client/prices.gen.ts`(由 `pnpm run prices` 生成)是**离线兜底**:没有实时价目时它兜住每一行。
+
+实时价目按需取,三个触发点:
+
+- **过期**:存储的价目按 **24 小时** 有效期算,过期后下一次页面加载(插件 apply)刷一次。
+  这条专门对付"调价了但快照里明明有旧价"——没有它,旧价会一直赢;
+- **切模型**:某行模型 id 与上一行不同(换模型 = 换了计价),刷一次;
+- **查不到**:某行的模型 id 在现有价目里查不到(新模型、relay 换了拼写),刷一次。
+
+其他细节:
+
+- 去重 + 限流:同一次页面会话内最多每 1 小时真正发一次请求,未定价模型重复渲染不会反复触发;
+- 结果只留 DeepSeek 子集,写进 `localStorage`(`dsh-cache-miss:prices`),体积几 KB,跨会话复用;
+- 拿到后立即生效:刷新事件通知已渲染的行重算,金额当场出现,不用刷新页面;
+- 全是 best-effort:`fetch` 失败、离线(`navigator.onLine === false`)、存储被禁,都继续用手上的
+  价目(实时缓存 → 快照),只警告一次,行照常显示其余字段。
+
+models.dev 返回 `Access-Control-Allow-Origin: *`,浏览器可直接取;`api.json` 约 5.7 MB
+(压缩后 ~590 KB),一天最多付一次,或换模型时付一次。
+
+- 金额 = 未命中输入 × `input` + 命中的缓存读 × `cache_read` + 缓存写入 × `input`,
+  单价为 models.dev 的 USD / 1M token;
+- 直接显示美元(models.dev 的计价口径),`~` 明示是本地估算,实际扣费以账单为准;不做汇率换算,少一层猜测;
+- 不做峰谷/节假日分时计价:那是单一供应商的定价策略,插件不为任何供应商写死时段规则;
+- 输出 token 不计入金额——提示行回答的是"这次 prompt 花了多少";
+- 模型名匹配不到快照时不显示金额(宁可没有,不编一个),其余字段照常;
+- 不做"换窗口建议":对会继续使用同一会话的人,会话记录本身通常比省下的缓存费更重要。
 
 ## 渲染与落点
 
@@ -200,3 +276,10 @@ idle 时长按快照形状取:先读 chat 快照的 `turnTimings`(顶层),没有
 - 不使用 emoji。
 - 不修改 DSH 源码、不逆向侵入 `turnTail` 链。
 - 类型仅来自官方 npm SDK。测试使用 vitest。
+
+
+
+
+
+
+

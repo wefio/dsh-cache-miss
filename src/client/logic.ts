@@ -4,6 +4,9 @@
  * and calls these; the renderer formats via {@link formatLine}.
  */
 
+import { CURRENCY, formatCost } from './prices'
+import { formatPrefixChange, type PrefixChangeLabel } from './prefix'
+
 /** The token-accounting subset this plugin reads, aligned with the official
  * `TokenUsage` contract (@deepseek-ai/dsh-llm). Counts are DISJOINT;
  * cache fields are optional because some providers report none. */
@@ -68,6 +71,16 @@ export function isCacheMiss(usage: CacheUsage | undefined, hasCacheEvidence = tr
   return hitRatio < MISS_HIT_RATIO
 }
 
+/** Approximate prefill cost attached to one line, in USD (models.dev list prices). */
+export interface LineCost {
+  /** Which rebuild the amount describes: the Turn's context, one Step, or both. */
+  scope: 'turn' | 'step' | 'both'
+  /** Prompt cost of what was rebuilt, in USD. */
+  amount: number
+  /** Prompt cost of the session, over the loaded window. */
+  session?: number
+}
+
 /** Presentable facts for one miss line. */
 export interface LineFacts {
   idleMs: number
@@ -79,6 +92,10 @@ export interface LineFacts {
   /** Step inside the Turn. Anything past the Turn's first request is a mid-Turn
    * cache invalidation, whose relevant fact is which step it happened at. */
   step?: number
+  /** Approximate amounts; omitted when the model has no list price. */
+  cost?: LineCost
+  /** Prompt-prefix change the core classified for this request, when known. */
+  prefixChange?: PrefixChangeLabel
 }
 
 function formatIdle(ms: number): string {
@@ -164,6 +181,11 @@ export function formatLocalTime(epochMs: number): string {
   return new Date(epochMs).toLocaleString()
 }
 
+/** One approximate amount with the estimate marker, without brackets. */
+function amountText(usd: number): string {
+  return `~${CURRENCY}${formatCost(usd)}`
+}
+
 /**
  * Render one cache-miss line.
  *
@@ -172,21 +194,33 @@ export function formatLocalTime(epochMs: number): string {
  * missed because something invalidated the cache mid-Turn, so it is reported by
  * step instead: the Turn-level gap says nothing about that step.
  *
+ * Amounts are approximate USD from the models.dev list price. The step and turn
+ * amounts share one bracket behind the token count they price (the official
+ * `step` / `turn` words), the session amount is a trailing segment, and a tool
+ * catalog change — the usual cause of a prefix invalidation — is its own segment.
+ *
  * @param facts - idle, re-billed (uncached) token count, optional cached-read
- *   count, TTFT (ms; 0 = absent), and the step inside the Turn.
+ *   count, TTFT (ms; 0 = absent), the step inside the Turn, optional cost, and an
+ *   optional tool-catalog change.
  * @returns the single-line message, without leading/trailing punctuation.
  */
 export function formatLine(facts: LineFacts): string {
-  const rebilled = formatTokens(facts.rebilledTokens)
+  const cost = facts.cost
   const step = facts.step ?? 1
-  const body = step > 1
-    ? `Cache miss at step ${step}: ${rebilled} tokens re-billed`
-    : `Cache miss after ${formatIdle(facts.idleMs)} idle: ${rebilled} tokens re-billed`
+  const head = step > 1 ? `Cache miss at step ${step}` : `Cache miss after ${formatIdle(facts.idleMs)} idle`
+  const rebilled = `${formatTokens(facts.rebilledTokens)} tokens re-billed`
+  const amounts: string[] = []
+  if (cost !== undefined) {
+    amounts.push(cost.scope === 'both' ? `(${amountText(cost.amount)})` : `(${cost.scope} ${amountText(cost.amount)})`)
+  }
+  const body = amounts.length > 0 ? `${head} · ${rebilled} ${amounts.join(' ')}` : `${head} · ${rebilled}`
   const tail: string[] = []
   if (typeof facts.cacheReadTokens === 'number' && facts.cacheReadTokens >= 0) {
     tail.push(`${formatCached(facts.cacheReadTokens)} cached`)
   }
   if ((facts.ttftMs ?? 0) > 0) tail.push(`ttft ${formatTtft(facts.ttftMs)} ↑`)
+  if (facts.prefixChange !== undefined) tail.push(formatPrefixChange(facts.prefixChange))
+  if (cost?.session !== undefined) tail.push(`session used (${amountText(cost.session)})`)
   return tail.length > 0 ? `${body} · ${tail.join(' · ')}` : body
 }
 
@@ -363,6 +397,10 @@ export interface LineInput {
   ttftMs: number
   /** Step inside the Turn; past 1 means the cache was invalidated mid-Turn. */
   step?: number
+  /** Approximate amounts; omitted when the model has no list price. */
+  cost?: LineCost
+  /** Prompt-prefix change the core classified for this request, when known. */
+  prefixChange?: PrefixChangeLabel
   /** True when any prior turn exists (turn > 1; turn numbers are global and
    * monotonic, so window cropping or a missing turn/end must not turn a real
    * miss into a cold start). False means the first turn of a fresh cache,
@@ -411,6 +449,18 @@ export function getLineStatus(input: LineInput): LineStatus {
       cacheReadTokens: usage.cacheReadTokens,
       ttftMs: input.ttftMs,
       ...(input.step === undefined ? {} : { step: input.step }),
+      ...(input.cost === undefined ? {} : { cost: input.cost }),
+      ...(input.prefixChange === undefined ? {} : { prefixChange: input.prefixChange }),
     }),
   }
 }
+
+
+
+
+
+
+
+
+
+

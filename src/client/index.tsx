@@ -1,4 +1,4 @@
-import { createElement, useEffect, useRef, useState } from 'react'
+import { createElement, useEffect, useReducer, useRef, useState } from 'react'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-chat/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
@@ -8,8 +8,11 @@ import {
   deriveTurnTimingFacts, formatDebugLine, formatLocalTime, getLineStatus, hasCacheFields, isDebugEnabled,
   resolveTurnTimings, turnProcessSelector, ttftMs,
   type LineStatus,
-  type TurnTiming,
 } from './logic'
+import { ensurePriceModel, loadedPrefillTotals, prefillCost, resolveModelPrice } from './prices'
+import { lineCost } from './line-cost'
+import { noteModel, refreshIfStale, subscribePrices } from './prices-live'
+import { createPrefixDefinition, createSystemPromptDefinition, readPrefixChange, type PromptInspector, type SystemInspector } from './prefix-node'
 
 /** Yellow cache-miss single line rendered under the turn's first assistant. */
 const LINE_STYLE = {
@@ -248,7 +251,7 @@ function useTurnProcessAnchor(
 }
 
 /** A snapshot-selector hook injected by the keyed chat seat. */
-type SnapshotSelector<T> = (selector: (snapshot: any) => T) => T
+type SnapshotSelector = <T>(selector: (snapshot: any) => T) => T
 
 /** Minimal props this renderer actually reads (node data + snapshot hooks). */
 interface CacheMissLineProps {
@@ -257,12 +260,12 @@ interface CacheMissLineProps {
    * ChatSnapshot selector. Cores from 0.2 inject it into the keyed seat; the
    * chat view keeps turn timings in that snapshot's `legacy` projection.
    */
-  useChat?: SnapshotSelector<ReadonlyMap<number, TurnTiming> | undefined>
+  useChat?: SnapshotSelector
   /**
    * Session-snapshot selector. Cores before 0.2 delivered the turn timings on
    * this snapshot; kept as the fallback source when `useChat` is absent.
    */
-  useSession?: SnapshotSelector<ReadonlyMap<number, TurnTiming> | undefined>
+  useSession?: SnapshotSelector
 }
 
 /**
@@ -321,15 +324,41 @@ function CacheMissLine(props: CacheMissLineProps): React.ReactElement | null {
   const chatTurnTimings = props.useChat?.((snapshot) => resolveTurnTimings(snapshot))
   const sessionTurnTimings = props.useSession?.((snapshot) => resolveTurnTimings(snapshot))
   const turnTimings = chatTurnTimings ?? sessionTurnTimings
+  // Prices arrive asynchronously only when a model is not in the bundled snapshot;
+  // a landed refresh bumps this counter so the line renders again with amounts.
+  const [, bumpPriceRender] = useReducer((tick: number) => tick + 1, 0)
+  useEffect(() => subscribePrices(bumpPriceRender), [])
+  // Prices are fetched in two situations only: a stale catalog is refreshed once per
+  // page load, and a model switch (or a model the snapshot cannot price) fetches
+  // during the session. Everything else renders from the bundled snapshot offline.
+  useEffect(() => {
+    ensurePriceModel(props.node?.data?.model)
+    noteModel(props.node?.data?.model)
+  }, [props.node?.data?.model])
+  // Loaded assistant records, for the Turn/session amounts the line reports as
+  // further segments. The array identity is the core's own, so it is a stable
+  // selection and only changes when the loaded nodes do.
+  const loadedNodes = props.useChat?.((snapshot) => (snapshot as { legacy?: { nodes?: unknown } }).legacy?.nodes)
   const timing = data === undefined
     ? { hasPriorTurn: false, idleMs: 0 }
     : deriveTurnTimingFacts(data.turn, turnTimings)
   const stepTtft = data === undefined ? 0 : ttftMs(data.stepStartTime, data.firstTokenTime)
+  const price = resolveModelPrice(data?.model)
+  const stepCost = price === undefined || data?.usage === undefined ? undefined : prefillCost(price, data.usage)
+  const totals = price === undefined ? undefined : loadedPrefillTotals(loadedNodes, price, data?.turn)
+  const cost = data === undefined
+    ? undefined
+    : lineCost(data.turn, data.step, price, stepCost, totals, loadedNodes)
+  // What the request changed in the prompt prefix (the usual cause of a miss);
+  // classified by the core, recorded by the header Definitions, keyed by `turn:step`.
+  const prefixChange = data === undefined ? undefined : readPrefixChange(data.turn, data.step)
   const decided: LineStatus = data === undefined ? { kind: 'hidden' } : getLineStatus({
     usage: data.usage,
     idleMs: timing.idleMs,
     ttftMs: stepTtft,
     step: data.step,
+    ...(cost === undefined ? {} : { cost }),
+    ...(prefixChange === undefined ? {} : { prefixChange }),
     hasPriorTurn: timing.hasPriorTurn,
     hasCacheEvidence,
   })
@@ -432,9 +461,12 @@ function CacheMissLine(props: CacheMissLineProps): React.ReactElement | null {
  */
 export const inject = ['slots']
 
-/** The register-capable Definition registry surface the cache-miss Definition needs. */
+/** The service surface the notices need: a Definition registry plus, on cores
+ * from 0.2, the canonical request-prompt interpretation. */
 interface CacheMissRegistry {
   register(definition: unknown): () => void
+  inspectRequestPrompt?: PromptInspector
+  inspectSystemPrompt?: SystemInspector
 }
 
 /** Structural registry read across the two core service names. */
@@ -451,12 +483,32 @@ function registerCacheMissDefinition(
   }
   const asRegistry = (value: unknown): CacheMissRegistry | undefined => {
     if (value === null || typeof value !== 'object') return undefined
-    const node = value as { register?: (definition: unknown) => () => void; events?: unknown }
-    if (typeof node.register === 'function') return node as CacheMissRegistry
+    const node = value as {
+      register?: (definition: unknown) => () => void
+      events?: unknown
+      inspectRequestPrompt?: unknown
+      inspectSystemPrompt?: unknown
+    }
+    const prompt = typeof node.inspectRequestPrompt === 'function'
+      ? (node.inspectRequestPrompt as PromptInspector)
+      : undefined
+    const system = typeof node.inspectSystemPrompt === 'function'
+      ? (node.inspectSystemPrompt as SystemInspector)
+      : undefined
+    const withInspect = (registry: CacheMissRegistry): CacheMissRegistry => ({
+      register: registry.register,
+      ...(prompt === undefined ? {} : { inspectRequestPrompt: prompt }),
+      ...(system === undefined ? {} : { inspectSystemPrompt: system }),
+    })
+    if (typeof node.register === 'function') {
+      return withInspect({ register: node.register.bind(node) })
+    }
     const events = node.events
     if (events !== null && typeof events === 'object') {
       const eventsNode = events as { register?: (definition: unknown) => () => void }
-      if (typeof eventsNode.register === 'function') return eventsNode as CacheMissRegistry
+      if (typeof eventsNode.register === 'function') {
+        return withInspect({ register: eventsNode.register.bind(eventsNode) })
+      }
     }
     return undefined
   }
@@ -475,10 +527,12 @@ function registerCacheMissDefinition(
 /** Build marker written to `<html>` while debug mode is on, so a page can prove
  * which bundle it is running: the client bundle loads only on page load, and a
  * stale one otherwise looks identical to the current one. */
-const DEBUG_BUILD_TAG = 'release-1.9'
+const DEBUG_BUILD_TAG = 'release-0.2'
 
 /** Register the cache-miss Definition (best-effort) and its keyed chat-node renderer. */
 export function apply(ctx: Context): void {
+  // The stored price catalog is trusted for a day; past that, fetch a fresh one.
+  refreshIfStale()
   if (isDebugEnabled() && typeof document !== 'undefined') {
     document.documentElement.setAttribute('data-dsh-cache-miss-debug', DEBUG_BUILD_TAG)
   }
@@ -500,6 +554,27 @@ export function apply(ctx: Context): void {
         } catch (error) {
           console.warn('[dsh-cache-miss] failed to register the cache-miss node; cache-miss lines are disabled.', error)
         }
+        // Prefix-change reporting needs the core's canonical prompt interpretation
+        // (which in turn needs the effective system prompt). Both are best-effort:
+        // a core without them simply produces a line without that segment.
+        const inspectSystem = registry.inspectSystemPrompt
+        const inspectPrompt = registry.inspectRequestPrompt
+        if (inspectSystem !== undefined) {
+          try {
+            const dispose = registry.register(createSystemPromptDefinition(inspectSystem.bind(registry)))
+            ctx.effect(() => dispose)
+          } catch (error) {
+            console.warn('[dsh-cache-miss] failed to register the system-prompt tracker; prefix changes stay unreported.', error)
+          }
+        }
+        if (inspectPrompt !== undefined) {
+          try {
+            const dispose = registry.register(createPrefixDefinition(inspectPrompt.bind(registry)))
+            ctx.effect(() => dispose)
+          } catch (error) {
+            console.warn('[dsh-cache-miss] failed to register the request-prefix tracker; prefix changes stay unreported.', error)
+          }
+        }
       })
     }
     return ctx.slots.register({
@@ -508,3 +583,19 @@ export function apply(ctx: Context): void {
     }, CacheMissLine)
   })
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
