@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseCatalog, shouldAttempt } from '../src/client/prices-live'
+import { isStale, parseCatalog, shouldAttempt } from '../src/client/prices-live'
 
 const DAY = 24 * 60 * 60 * 1000
 
@@ -40,6 +40,23 @@ describe('parseCatalog', () => {
   })
 })
 
+describe('isStale', () => {
+  it('treats missing prices as stale', () => {
+    expect(isStale(undefined, 1_000)).toBe(true)
+  })
+
+  it('trusts prices for one day', () => {
+    const now = 30 * 60 * 60 * 1000
+    expect(isStale(now - 60 * 60 * 1000, now)).toBe(false)
+    expect(isStale(now - 23 * 60 * 60 * 1000, now)).toBe(false)
+  })
+
+  it('asks for fresh prices once the day is up, so a reprice cannot hide behind an old snapshot', () => {
+    const now = 30 * 60 * 60 * 1000
+    expect(isStale(now - 25 * 60 * 60 * 1000, now)).toBe(true)
+  })
+})
+
 describe('shouldAttempt', () => {
   it('allows the first attempt of a page session', () => {
     expect(shouldAttempt(undefined, 1_000)).toBe(true)
@@ -56,4 +73,5 @@ describe('shouldAttempt', () => {
     expect(shouldAttempt(now - 61 * 60 * 1000, now)).toBe(true)
   })
 })
+
 

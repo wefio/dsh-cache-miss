@@ -45,15 +45,14 @@ Cache miss after 3m idle · 182k tokens re-billed (turn ~$0.027) · 0.8k cached 
 
 Prices come from the [models.dev](https://models.dev/api.json) DeepSeek catalog and
 are shown in its own USD units — no exchange-rate conversion, with `~` marking an
-estimate. The snapshot ships with the package, so the normal path is offline: it is
-only when a line meets a model the snapshot cannot price (a newly released model, a
-relay reporting a new spelling) that the page fetches the live catalog once in the
-background, stores the DeepSeek subset in localStorage, and re-renders the line with
-amounts — so a new model arrives without a plugin release. If that fetch fails or the
-page is offline, the snapshot stays in charge and an unmatched model shows no amount
-rather than a made-up price. Peak/off-peak pricing is a single-vendor policy and is
-deliberately not hard-coded. Amounts cover the prompt only (uncached input plus cache
-reads), never output tokens.
+estimate. The bundled snapshot is only an offline fallback; the live catalog is fetched
+on demand and trusted for **24 hours**: a page load after that refreshes it, switching
+models refreshes it, and a model the catalog cannot price (a new release, a relay
+reporting a new spelling) refreshes it too — so neither a reprice nor a new model waits
+for a plugin release. If a fetch fails or the page is offline the current catalog stays
+in charge, and an unmatched model shows no amount rather than a made-up price.
+Peak/off-peak pricing is a single-vendor policy and is deliberately not hard-coded.
+Amounts cover the prompt only (uncached input plus cache reads), never output tokens.
 
 It is pure presentation: nothing is written to the session log, no DSH source
 is modified, and it does not take the turn-tail chain, so it does not collide

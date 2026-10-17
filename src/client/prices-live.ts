@@ -18,6 +18,8 @@ const STORAGE_KEY = 'dsh-cache-miss:prices'
 const RECORD_VERSION = 1
 /** Minimum gap between two refresh attempts for the same page session. */
 const MIN_ATTEMPT_INTERVAL_MS = 60 * 60 * 1000
+/** How long a stored catalog stays trusted before the page tries to refresh it. */
+const STORED_TTL_MS = 24 * 60 * 60 * 1000
 
 /** One stored catalog, small enough for localStorage (only the DeepSeek subset). */
 interface PriceRecord {
@@ -93,6 +95,20 @@ export function shouldAttempt(attemptedAt: number | undefined, now: number): boo
 }
 
 /**
+ * Whether the stored price data is past its one-day trust window.
+ *
+ * A stale catalog still prices lines — it is simply no longer authoritative, so
+ * the page fetches a fresher one in the background. This is what keeps a reprice
+ * from going unnoticed just because the bundled snapshot happens to list the model.
+ *
+ * @param fetchedAt - when the stored catalog was fetched, or undefined when none.
+ * @param now - current time in ms.
+ */
+export function isStale(fetchedAt: number | undefined, now: number): boolean {
+  return fetchedAt === undefined || now - fetchedAt > STORED_TTL_MS
+}
+
+/**
  * Extract the DeepSeek price rows from a models.dev catalog.
  *
  * @param text - raw `api.json` body.
@@ -135,6 +151,40 @@ export function priceCatalog(): Readonly<Record<string, ModelPrice>> {
     live = readRecord()?.models ?? {}
   }
   return live
+}
+
+/**
+ * Refresh when the stored prices are past their one-day trust window.
+ *
+ * Called once per plugin apply, so a page picked up after a day starts one
+ * background refresh instead of trusting an old catalog indefinitely.
+ *
+ * @param now - current time in ms, injectable for tests.
+ * @returns whether a request was actually started.
+ */
+export function refreshIfStale(now = Date.now()): boolean {
+  if (!isStale(readRecord()?.fetchedAt, now)) return false
+  return requestPriceRefresh(now)
+}
+
+/** Model the previously rendered line carried, to notice a switch. */
+let lastModel: string | undefined
+
+/**
+ * Note the model a freshly rendered line carries and refresh when it switched.
+ *
+ * A switch means the reader is now paying different rates, and the stored catalog
+ * may be up to a day old — so this is the second moment the plugin spends a
+ * request. The first line of a page only records the model: there is nothing to
+ * compare it with yet.
+ *
+ * @param model - model id from the line's assistant message source.
+ */
+export function noteModel(model: unknown): void {
+  if (typeof model !== 'string' || model === '') return
+  const previous = lastModel
+  lastModel = model
+  if (previous !== undefined && previous !== model) requestPriceRefresh()
 }
 
 /**

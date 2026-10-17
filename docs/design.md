@@ -127,22 +127,26 @@ DeepSeek 按前缀命中缓存:系统提示或**工具目录**任一处变了,�
 行里没有这一段——其余功能不受影响。
 ## 计价口径
 
-价格取自 [models.dev](https://models.dev/api.json) 的 `deepseek` provider,由
-`pnpm run prices` 重新生成 `src/client/prices.gen.ts`,快照随包提交。所以**默认不联网**:
-翻页不会多一个跨域请求,供应商接口抖动也不影响提示行。
+价格取自 [models.dev](https://models.dev/api.json) 的 `deepseek` provider。随包提交的
+`src/client/prices.gen.ts`(由 `pnpm run prices` 生成)是**离线兜底**:没有实时价目时它兜住每一行。
 
-快照压不住的情况只有"出了新模型 / 改价",而这两种都不该逼着发版,于是加了一条按需刷新:
+实时价目按需取,三个触发点:
 
-- 触发条件:某一行拿到的模型 id 在快照里查不到(新模型、relay 换了拼写),才请求一次;
-- 不是定时器:模型都能定价时永远不联网;
-- 去重 + 限流:同一次页面会话内,未定价模型重复出现不会重复请求(至少间隔 1 小时);
-- 结果只留 DeepSeek 子集,写进 `localStorage`(`dsh-cache-miss:prices`),体积几 KB;
+- **过期**:存储的价目按 **24 小时** 有效期算,过期后下一次页面加载(插件 apply)刷一次。
+  这条专门对付"调价了但快照里明明有旧价"——没有它,旧价会一直赢;
+- **切模型**:某行模型 id 与上一行不同(换模型 = 换了计价),刷一次;
+- **查不到**:某行的模型 id 在现有价目里查不到(新模型、relay 换了拼写),刷一次。
+
+其他细节:
+
+- 去重 + 限流:同一次页面会话内最多每 1 小时真正发一次请求,未定价模型重复渲染不会反复触发;
+- 结果只留 DeepSeek 子集,写进 `localStorage`(`dsh-cache-miss:prices`),体积几 KB,跨会话复用;
 - 拿到后立即生效:刷新事件通知已渲染的行重算,金额当场出现,不用刷新页面;
-- 全是 best-effort:`fetch` 失败、离线(`navigator.onLine === false`)、存储被禁,都退回快照,
-  只警告一次,行照常显示其余字段。
+- 全是 best-effort:`fetch` 失败、离线(`navigator.onLine === false`)、存储被禁,都继续用手上的
+  价目(实时缓存 → 快照),只警告一次,行照常显示其余字段。
 
 models.dev 返回 `Access-Control-Allow-Origin: *`,浏览器可直接取;`api.json` 约 5.7 MB
-(压缩后 ~590 KB),只在真的遇到未知模型时付一次。
+(压缩后 ~590 KB),一天最多付一次,或换模型时付一次。
 
 - 金额 = 未命中输入 × `input` + 命中的缓存读 × `cache_read` + 缓存写入 × `input`,
   单价为 models.dev 的 USD / 1M token;

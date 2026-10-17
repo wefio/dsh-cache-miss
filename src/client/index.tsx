@@ -11,7 +11,7 @@ import {
 } from './logic'
 import { ensurePriceModel, loadedPrefillTotals, prefillCost, resolveModelPrice } from './prices'
 import { lineCost } from './line-cost'
-import { subscribePrices } from './prices-live'
+import { noteModel, refreshIfStale, subscribePrices } from './prices-live'
 import { createPrefixDefinition, createSystemPromptDefinition, readPrefixChange, type PromptInspector, type SystemInspector } from './prefix-node'
 
 /** Yellow cache-miss single line rendered under the turn's first assistant. */
@@ -328,10 +328,12 @@ function CacheMissLine(props: CacheMissLineProps): React.ReactElement | null {
   // a landed refresh bumps this counter so the line renders again with amounts.
   const [, bumpPriceRender] = useReducer((tick: number) => tick + 1, 0)
   useEffect(() => subscribePrices(bumpPriceRender), [])
-  // Ask for the live catalog only for a model the snapshot cannot price, which is
-  // exactly the "a new model appeared" case — no timer, no fetch on every load.
+  // Prices are fetched in two situations only: a stale catalog is refreshed once per
+  // page load, and a model switch (or a model the snapshot cannot price) fetches
+  // during the session. Everything else renders from the bundled snapshot offline.
   useEffect(() => {
     ensurePriceModel(props.node?.data?.model)
+    noteModel(props.node?.data?.model)
   }, [props.node?.data?.model])
   // Loaded assistant records, for the Turn/session amounts the line reports as
   // further segments. The array identity is the core's own, so it is a stable
@@ -529,7 +531,8 @@ const DEBUG_BUILD_TAG = 'release-0.2'
 
 /** Register the cache-miss Definition (best-effort) and its keyed chat-node renderer. */
 export function apply(ctx: Context): void {
-
+  // The stored price catalog is trusted for a day; past that, fetch a fresh one.
+  refreshIfStale()
   if (isDebugEnabled() && typeof document !== 'undefined') {
     document.documentElement.setAttribute('data-dsh-cache-miss-debug', DEBUG_BUILD_TAG)
   }
@@ -580,6 +583,7 @@ export function apply(ctx: Context): void {
     }, CacheMissLine)
   })
 }
+
 
 
 
