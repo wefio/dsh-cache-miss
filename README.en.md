@@ -37,6 +37,10 @@ Cache miss after 3m idle · 182k tokens re-billed (turn ~$0.027) · 0.8k cached 
   this request (system prompt / tool catalog; both are part of the cache prefix, so a change
   re-bills everything after it — the most common cause of a miss). The classification comes from
   the core; the plugin only reports it.
+- `(~config)` — the request header's config moved (provider switch, reasoningEffort, …). A different
+  config is a different cache namespace, so the whole prompt is re-billed; the core's classification
+  does not cover it, so the plugin adds it by comparing the same canonical config. It stacks, e.g.
+  `(~system+config)`.
 - `session (~$…)` — the session-level approximate amount, over the loaded window.
 
 Prices come from the [models.dev](https://models.dev/api.json) DeepSeek snapshot and
@@ -100,6 +104,8 @@ Restart `dsh web` (or hard-refresh the running GUI) to load the client bundle.
 - Providers that have never reported cache fields get one grey notice per
   provider and no heuristic guess: TTFT is too sensitive to network/load to
   reliably separate "slow because of a cache miss" from "just slow".
+
+
 
 
 

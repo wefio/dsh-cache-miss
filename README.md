@@ -25,6 +25,8 @@ Cache miss after 3m idle · 182k tokens re-billed (turn ~$0.027) · 0.8k cached 
 - `ttft` —— 首 token 时延（取自 assistant timing，可用时显示）；上箭头示意重建 prefill 通常更慢。
 - `(~system)` / `(~tools)` / `(~system+tools)` —— 核心对本次请求的**前缀变更分类**（系统提示 / 工具目录，
   两者都属于缓存前缀，任一处变了都会让之后全部重算，所以这是 miss 最常见的原因）。分类由核心给出，插件只转述。
+- `(~config)` —— 请求头里的 config 变了（provider 切换、reasoningEffort 等）。不同配置就是不同缓存命名空间，
+  整段 prompt 重算；核心分类不覆盖这一项，由插件在同一份规范化 config 上做等值比较补上，可与分类叠加。
 - `session (~$…)` —— 会话级近似金额（已载入窗口口径）。
 
 价格取自 [models.dev](https://models.dev/api.json) 的 DeepSeek 价目快照，直接按它的美元单价显示（不做汇率换算，`~` 明示估算）；快照随包发布，不在浏览器里请求外部接口。峰谷/节假日这类分时价是单一供应商的定价策略，插件不写死；模型匹配不到价目表时不显示金额（不编价格）。金额只算 prompt 部分（未命中输入 + 命中缓存读），不含输出 token。
@@ -56,6 +58,8 @@ dsh plugin --profile web add dsh-cache-miss
 - TTFT 是 step 的 `step/start` 事件到首个非空 token delta 事件的墙钟间隔，取自会话事件时间；当任一边界落在已加载窗口之外时视为缺省（不显示 `· ttft ...` 段）。
 - 节点对每个 assistant step 都会发布，但命中时渲染为空，因此命中轮不产生可见行；每一步至多输出一条控制台日志。
 - 从未出现 cache 字段的 provider 首次出现时显示一次灰色“无法确认”提示，不做启发式猜测——TTFT 受网络/负载影响，无法可靠区分"cache miss 导致慢"与"本来就慢"。
+
+
 
 
 

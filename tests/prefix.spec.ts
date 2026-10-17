@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatPrefixChange, prefixChangeKind } from '../src/client/prefix'
+import { configSignature, formatPrefixChange, prefixChangeKind, prefixChangeLabel } from '../src/client/prefix'
 import { formatLine } from '../src/client/logic'
 
 describe('prefixChangeKind', () => {
@@ -17,11 +17,42 @@ describe('prefixChangeKind', () => {
   })
 })
 
+describe('configSignature', () => {
+  it('compares configs by value, not by key order', () => {
+    expect(configSignature({ provider: 'a', reasoningEffort: 'high' }))
+      .toBe(configSignature({ reasoningEffort: 'high', provider: 'a' }))
+  })
+
+  it('keeps array order significant', () => {
+    expect(configSignature({ tools: ['a', 'b'] })).not.toBe(configSignature({ tools: ['b', 'a'] }))
+  })
+
+  it('distinguishes values and missing keys', () => {
+    expect(configSignature({ reasoningEffort: 'high' })).not.toBe(configSignature({ reasoningEffort: 'low' }))
+    expect(configSignature({ provider: 'a' })).not.toBe(configSignature({}))
+  })
+})
+
+describe('prefixChangeLabel', () => {
+  it('joins the classifier words with a plus', () => {
+    expect(prefixChangeLabel('tools', false)).toBe('tools')
+    expect(prefixChangeLabel('system-and-tools', false)).toBe('system+tools')
+  })
+
+  it('reports a config change even when the classifier names nothing', () => {
+    expect(prefixChangeLabel(undefined, true)).toBe('config')
+    expect(prefixChangeLabel('system', true)).toBe('system+config')
+  })
+
+  it('reports nothing when neither moved', () => {
+    expect(prefixChangeLabel(undefined, false)).toBeUndefined()
+  })
+})
+
 describe('formatPrefixChange', () => {
-  it('renders the core kind verbatim behind the estimate marker', () => {
+  it('renders the label behind the estimate marker', () => {
     expect(formatPrefixChange('tools')).toBe('(~tools)')
-    expect(formatPrefixChange('system')).toBe('(~system)')
-    expect(formatPrefixChange('system-and-tools')).toBe('(~system-and-tools)')
+    expect(formatPrefixChange('system+tools+config')).toBe('(~system+tools+config)')
   })
 })
 
@@ -32,11 +63,11 @@ describe('formatLine with a prefix change', () => {
       rebilledTokens: 22_000,
       cacheReadTokens: 0,
       ttftMs: 8_100,
-      prefixChange: 'tools',
+      prefixChange: 'tools+config',
       cost: { scope: 'turn', amount: 0.003, session: 2.9 },
     })
     expect(line).toBe(
-      'Cache miss after 1m idle · 22k tokens re-billed (turn ~$0.003) · 0k cached · ttft 8.1s ↑ · (~tools) · session (~$2.90)',
+      'Cache miss after 1m idle · 22k tokens re-billed (turn ~$0.003) · 0k cached · ttft 8.1s ↑ · (~tools+config) · session (~$2.90)',
     )
   })
 

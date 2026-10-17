@@ -5,7 +5,7 @@
  */
 
 import { CURRENCY, formatCost } from './prices'
-import { formatPrefixChange, type PrefixChangeKind } from './prefix'
+import { formatPrefixChange, type PrefixChangeLabel } from './prefix'
 
 /** The token-accounting subset this plugin reads, aligned with the official
  * `TokenUsage` contract (@deepseek-ai/dsh-llm). Counts are DISJOINT;
@@ -95,7 +95,7 @@ export interface LineFacts {
   /** Approximate amounts; omitted when the model has no list price. */
   cost?: LineCost
   /** Prompt-prefix change the core classified for this request, when known. */
-  prefixChange?: PrefixChangeKind
+  prefixChange?: PrefixChangeLabel
 }
 
 function formatIdle(ms: number): string {
@@ -400,7 +400,7 @@ export interface LineInput {
   /** Approximate amounts; omitted when the model has no list price. */
   cost?: LineCost
   /** Prompt-prefix change the core classified for this request, when known. */
-  prefixChange?: PrefixChangeKind
+  prefixChange?: PrefixChangeLabel
   /** True when any prior turn exists (turn > 1; turn numbers are global and
    * monotonic, so window cropping or a missing turn/end must not turn a real
    * miss into a cold start). False means the first turn of a fresh cache,
@@ -454,6 +454,8 @@ export function getLineStatus(input: LineInput): LineStatus {
     }),
   }
 }
+
+
 
 
 

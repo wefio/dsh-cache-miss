@@ -69,6 +69,9 @@ Cache miss after 3m idle · 182k tokens re-billed (turn ~$0.027) · 0.8k cached 
 - `(~system)` / `(~tools)` / `(~system+tools)`:核心对本次请求的**前缀变更分类**。系统提示和
   工具目录都属于前缀,任一处变了就从变化点往后全部失效,所以这是 miss 最常见的原因。
   分类原样来自核心,插件不做二次推断(理由见「前缀变更检测」)。
+- `(~config)`:同一份 inspector 结果里的 `config` 变了(provider 切换、reasoningEffort 等)。
+  配置不同就是不同的缓存命名空间,整段 prompt 都会重算;核心的分类只覆盖 system/tools,
+  所以这一段由插件在**同一份规范化 config** 上做等值比较补上,可与分类叠加:`(~system+config)`。
 - `session (~$…)`:会话级近似金额(已载入窗口口径)。
 - `ttft`:该条 assistant 首 token 时延(TTFT)= 首个 token 事件时间 - `step/start`
   事件时间,秒、一位小数,末尾加向上箭头示意重建 prefill 通常更慢;边界缺失时不显示该段。
@@ -105,8 +108,12 @@ DeepSeek 按前缀命中缓存:系统提示或**工具目录**任一处变了,�
   用 `uiConversation.inspectSystemPrompt` 保留"当前生效的系统提示"——header inspector 需要它才
   分得清 system 与 tools;
 - Definition `cache-miss-prefix`:只 `match` `request/header`,用 `reader.previous(...)` 取上一个
-  请求快照与上一步的系统提示,调上面的 inspector,把 `change.kind` 写进模块级 map
+  请求快照与上一步的系统提示,调上面的 inspector;`change.kind` 直接写进模块级 map
   (键 `turn:step`,上限 500 条),渲染层按自己的 `turn`/`step` 取用,拼成 `(~tools)` 这类段。
+  同时用 inspector 返回的规范化 `config` 与上一份做等值比较(递归排序键后再比 JSON),
+  变了就在标签里补 `config`——核心的分类不覆盖这一项,而 provider 切换(实测
+  `deepseek-official` ↔ `deepseek-account`)会直接换掉缓存命名空间,整段 prompt 重算。
+  比较的仍然是同一份 inspector 结果,没有引入新的核心结构。
 
 为什么不做工具级 diff:那需要自己按 name + `description`/`parameters` 比较两份工具 schema,
 等于把插件绑死在核心的 `ToolSchema` 形状和 inspector 的返回结构上。核心一改,插件就炸;
@@ -250,6 +257,8 @@ idle 时长按快照形状取:先读 chat 快照的 `turnTimings`(顶层),没有
 - 不使用 emoji。
 - 不修改 DSH 源码、不逆向侵入 `turnTail` 链。
 - 类型仅来自官方 npm SDK。测试使用 vitest。
+
+
 
 
 
