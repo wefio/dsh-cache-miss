@@ -117,7 +117,7 @@ describe('formatLine with amounts', () => {
       cost: { scope: 'both', amount: 0.134, session: 2.9 },
     })
     expect(both).toBe(
-      'Cache miss after 1m idle · 22k tokens re-billed (~$0.134) · 0k cached · ttft 8.1s ↑ · session (~$2.90)',
+      'Cache miss after 1m idle · 22k tokens re-billed (~$0.134) · 0k cached · ttft 8.1s ↑ · session used (~$2.90)',
     )
   })
 
@@ -127,6 +127,7 @@ describe('formatLine with amounts', () => {
   })
 
 })
+
 
 
 

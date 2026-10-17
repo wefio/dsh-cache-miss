@@ -34,14 +34,15 @@ describe('configSignature', () => {
 })
 
 describe('prefixChangeLabel', () => {
-  it('joins the classifier words with a plus', () => {
+  it('spells the classifier out in words a reader can act on', () => {
     expect(prefixChangeLabel('tools', false)).toBe('tools')
-    expect(prefixChangeLabel('system-and-tools', false)).toBe('system+tools')
+    expect(prefixChangeLabel('system', false)).toBe('system prompt')
+    expect(prefixChangeLabel('system-and-tools', false)).toBe('system prompt + tools')
   })
 
   it('reports a config change even when the classifier names nothing', () => {
     expect(prefixChangeLabel(undefined, true)).toBe('config')
-    expect(prefixChangeLabel('system', true)).toBe('system+config')
+    expect(prefixChangeLabel('system', true)).toBe('system prompt + config')
   })
 
   it('reports nothing when neither moved', () => {
@@ -50,24 +51,24 @@ describe('prefixChangeLabel', () => {
 })
 
 describe('formatPrefixChange', () => {
-  it('renders the label behind the estimate marker', () => {
-    expect(formatPrefixChange('tools')).toBe('(~tools)')
-    expect(formatPrefixChange('system+tools+config')).toBe('(~system+tools+config)')
+  it('states what changed, without the estimate marker', () => {
+    expect(formatPrefixChange('tools')).toBe('(tools changed)')
+    expect(formatPrefixChange('system prompt + tools + config')).toBe('(system prompt + tools + config changed)')
   })
 })
 
 describe('formatLine with a prefix change', () => {
-  it('places the change after TTFT and before the session amount', () => {
+  it('places the change after TTFT and before the session usage', () => {
     const line = formatLine({
       idleMs: 60_000,
       rebilledTokens: 22_000,
       cacheReadTokens: 0,
       ttftMs: 8_100,
-      prefixChange: 'tools+config',
+      prefixChange: 'tools + config',
       cost: { scope: 'turn', amount: 0.003, session: 2.9 },
     })
     expect(line).toBe(
-      'Cache miss after 1m idle · 22k tokens re-billed (turn ~$0.003) · 0k cached · ttft 8.1s ↑ · (~tools+config) · session (~$2.90)',
+      'Cache miss after 1m idle · 22k tokens re-billed (turn ~$0.003) · 0k cached · ttft 8.1s ↑ · (tools + config changed) · session used (~$2.90)',
     )
   })
 

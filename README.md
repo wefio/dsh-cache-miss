@@ -13,7 +13,7 @@ DSH 网页插件：在一轮的**第一条 assistant 回复**正下方，以一�
 本插件在轮首第一条 assistant 回复正下方，仅当该请求确为缓存未命中时渲染一条黄色单行：
 
 ```
-Cache miss after 3m idle · 182k tokens re-billed (turn ~$0.027) · 0.8k cached · ttft 2.1s ↑ · (~tools) · session (~$2.90)
+Cache miss after 3m idle · 182k tokens re-billed (turn ~$0.027) · 0.8k cached · ttft 2.1s ↑ · (tools changed) · session used (~$2.90)
 ```
 ![缓存未命中提示](cache-miss.png)
 
@@ -23,11 +23,12 @@ Cache miss after 3m idle · 182k tokens re-billed (turn ~$0.027) · 0.8k cached 
   轮中某步 miss 标 `step`（只有该步改动的前缀重建），同一轮两者都重建过就直接给合计 `(~$…)`；`~` 明示估算。
 - `cached` —— 同一 prefill 中命中缓存的部分（provider 回报时显示），让“重算量 vs 命中量”一目了然。
 - `ttft` —— 首 token 时延（取自 assistant timing，可用时显示）；上箭头示意重建 prefill 通常更慢。
-- `(~system)` / `(~tools)` / `(~system+tools)` —— 核心对本次请求的**前缀变更分类**（系统提示 / 工具目录，
-  两者都属于缓存前缀，任一处变了都会让之后全部重算，所以这是 miss 最常见的原因）。分类由核心给出，插件只转述。
-- `(~config)` —— 请求头里的 config 变了（provider 切换、reasoningEffort 等）。不同配置就是不同缓存命名空间，
+- `(system prompt changed)` / `(tools changed)` —— 核心对本次请求的**前缀变更分类**，写成人话而不是照抄枚举名
+  （系统提示 / 工具目录都属于缓存前缀，任一处变了都会让之后全部重算，所以这是 miss 最常见的原因）。
+  分类由核心给出，插件只转述。
+- `(config changed)` —— 请求头里的 config 变了（provider 切换、reasoningEffort 等）。不同配置就是不同缓存命名空间，
   整段 prompt 重算；核心分类不覆盖这一项，由插件在同一份规范化 config 上做等值比较补上，可与分类叠加。
-- `session (~$…)` —— 会话级近似金额（已载入窗口口径）。
+- `session used (~$…)` —— 会话已用量（已载入窗口口径的近似金额），`used` 标明这是累计而不是本次。
 
 价格取自 [models.dev](https://models.dev/api.json) 的 DeepSeek 价目快照，直接按它的美元单价显示（不做汇率换算，`~` 明示估算）；快照随包发布，不在浏览器里请求外部接口。峰谷/节假日这类分时价是单一供应商的定价策略，插件不写死；模型匹配不到价目表时不显示金额（不编价格）。金额只算 prompt 部分（未命中输入 + 命中缓存读），不含输出 token。
 

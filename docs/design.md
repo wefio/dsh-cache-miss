@@ -55,7 +55,7 @@ cache 字段,插件无法区分「完全 miss」与「命中但不报明细」,�
 轮首第一条 assistant 回复正下方,渲染一条黄色等宽单行,形如:
 
 ```
-Cache miss after 3m idle · 182k tokens re-billed (turn ~$0.027) · 0.8k cached · ttft 2.1s ↑ · (~tools) · session (~$2.90)
+Cache miss after 3m idle · 182k tokens re-billed (turn ~$0.027) · 0.8k cached · ttft 2.1s ↑ · (tools changed) · session used (~$2.90)
 ```
 
 - `idle`:距上一轮结束的空闲时长,>= 60s 显示为分钟,否则为秒。
@@ -66,13 +66,15 @@ Cache miss after 3m idle · 182k tokens re-billed (turn ~$0.027) · 0.8k cached 
   **prompt 部分**(未命中输入 + 命中的缓存读),不含 output——本插件关心的是缓存成本,
   各层级同口径才可比。`~` 明示估算,`$` 即 models.dev 的美元单价。
 - `cached`:该请求 `cacheReadTokens`(命中部分)的千分位缩写(k),provider 未回报时不显示。
-- `(~system)` / `(~tools)` / `(~system+tools)`:核心对本次请求的**前缀变更分类**。系统提示和
+- `(system prompt changed)` / `(tools changed)`:核心对本次请求的**前缀变更分类**,写成人话而不是
+  照抄枚举名——行的目的是说"为什么重算",只写 `system` / `tools` 会读成一个 token 桶。系统提示和
   工具目录都属于前缀,任一处变了就从变化点往后全部失效,所以这是 miss 最常见的原因。
-  分类原样来自核心,插件不做二次推断(理由见「前缀变更检测」)。
-- `(~config)`:同一份 inspector 结果里的 `config` 变了(provider 切换、reasoningEffort 等)。
+  分类来自核心,插件不做二次推断(理由见「前缀变更检测」)。
+- `(config changed)`:同一份 inspector 结果里的 `config` 变了(provider 切换、reasoningEffort 等)。
   配置不同就是不同的缓存命名空间,整段 prompt 都会重算;核心的分类只覆盖 system/tools,
-  所以这一段由插件在**同一份规范化 config** 上做等值比较补上,可与分类叠加:`(~system+config)`。
-- `session (~$…)`:会话级近似金额(已载入窗口口径)。
+  所以这一段由插件在**同一份规范化 config** 上做等值比较补上,可与分类叠加:
+  `(system prompt + config changed)`。
+- `session used (~$…)`:会话已用量(已载入窗口口径的近似金额);`used` 指明这是累计花费而不是本次。
 - `ttft`:该条 assistant 首 token 时延(TTFT)= 首个 token 事件时间 - `step/start`
   事件时间,秒、一位小数,末尾加向上箭头示意重建 prefill 通常更慢;边界缺失时不显示该段。
   流式方言下取首个非空 delta 的事件时间;结算方言下取 `assistant/message.stream` 中

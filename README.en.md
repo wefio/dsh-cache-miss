@@ -19,7 +19,7 @@ This plugin renders, under each assistant reply whose request missed, a single
 yellow line, live, as soon as that step's `usage` chunk arrives:
 
 ```
-Cache miss after 3m idle · 182k tokens re-billed (turn ~$0.027) · 0.8k cached · ttft 2.1s ↑ · (~tools) · session (~$2.90)
+Cache miss after 3m idle · 182k tokens re-billed (turn ~$0.027) · 0.8k cached · ttft 2.1s ↑ · (tools changed) · session used (~$2.90)
 ```
 ![cache-miss notice](cache-miss.png)
 
@@ -33,15 +33,15 @@ Cache miss after 3m idle · 182k tokens re-billed (turn ~$0.027) · 0.8k cached 
   no scope word. `~` marks an estimate.
 - `ttft` — first-token latency, when available; the up arrow hints a rebuild
   prefill usually ran slower.
-- `(~system)` / `(~tools)` / `(~system+tools)` — the core's **prefix change classification** for
-  this request (system prompt / tool catalog; both are part of the cache prefix, so a change
-  re-bills everything after it — the most common cause of a miss). The classification comes from
-  the core; the plugin only reports it.
+- `(system prompt changed)` / `(tools changed)` — the core's **prefix change classification** for this
+  request, in words rather than the classifier's enum (both the system prompt and the tool catalog
+  are part of the cache prefix, so a change re-bills everything after it — the most common cause of a
+  miss). The classification comes from the core; the plugin only reports it.
 - `(~config)` — the request header's config moved (provider switch, reasoningEffort, …). A different
   config is a different cache namespace, so the whole prompt is re-billed; the core's classification
   does not cover it, so the plugin adds it by comparing the same canonical config. It stacks, e.g.
   `(~system+config)`.
-- `session (~$…)` — the session-level approximate amount, over the loaded window.
+- `session used (~$…)` — the session's consumed amount so far, over the loaded window.
 
 Prices come from the [models.dev](https://models.dev/api.json) DeepSeek snapshot and
 are shown in its own USD units — no exchange-rate conversion, with `~` marking an

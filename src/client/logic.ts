@@ -220,7 +220,7 @@ export function formatLine(facts: LineFacts): string {
   }
   if ((facts.ttftMs ?? 0) > 0) tail.push(`ttft ${formatTtft(facts.ttftMs)} ↑`)
   if (facts.prefixChange !== undefined) tail.push(formatPrefixChange(facts.prefixChange))
-  if (cost?.session !== undefined) tail.push(`session (${amountText(cost.session)})`)
+  if (cost?.session !== undefined) tail.push(`session used (${amountText(cost.session)})`)
   return tail.length > 0 ? `${body} · ${tail.join(' · ')}` : body
 }
 
@@ -454,6 +454,7 @@ export function getLineStatus(input: LineInput): LineStatus {
     }),
   }
 }
+
 
 
 

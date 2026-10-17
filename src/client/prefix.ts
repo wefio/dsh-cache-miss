@@ -38,17 +38,22 @@ export function prefixChangeKind(kind: unknown): PrefixChangeKind | undefined {
 /**
  * Build the label from the core's classification and the config comparison.
  *
+ * The words are reader-facing ("system prompt", not the classifier's `system`):
+ * a bare enum in the line reads like a token bucket instead of a cause.
+ *
  * @param kind - classification from {@link prefixChangeKind}.
  * @param configChanged - whether the canonical request config differs.
- * @returns a label such as `tools`, `config`, or `system+tools+config`.
+ * @returns a label such as `tools`, `config`, or `system prompt + tools + config`.
  */
 export function prefixChangeLabel(
   kind: PrefixChangeKind | undefined,
   configChanged: boolean,
 ): PrefixChangeLabel | undefined {
-  const parts = kind === undefined ? [] : kind.split('-and-')
+  const parts: string[] = []
+  if (kind === 'system' || kind === 'system-and-tools') parts.push('system prompt')
+  if (kind === 'tools' || kind === 'system-and-tools') parts.push('tools')
   if (configChanged) parts.push('config')
-  return parts.length === 0 ? undefined : parts.join('+')
+  return parts.length === 0 ? undefined : parts.join(' + ')
 }
 
 /**
@@ -75,9 +80,13 @@ function sortValue(value: unknown): unknown {
 /**
  * Render one prefix change as its line segment.
  *
+ * The segment says what moved instead of echoing the classifier's enum. No `~`
+ * here: nothing about a change is an estimate.
+ *
  * @param label - label from {@link prefixChangeLabel}.
- * @returns `(~tools)`, `(~system+tools+config)` and the like.
+ * @returns `(tools changed)`, `(system prompt + tools changed)` and the like.
  */
 export function formatPrefixChange(label: PrefixChangeLabel): string {
-  return `(~${label})`
+  return `(${label} changed)`
 }
+
