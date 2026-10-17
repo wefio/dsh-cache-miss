@@ -5,7 +5,7 @@
  */
 
 import { CURRENCY, formatCost } from './prices'
-import { formatToolChange, type ToolChange } from './prefix'
+import { formatPrefixChange, type PrefixChangeKind } from './prefix'
 
 /** The token-accounting subset this plugin reads, aligned with the official
  * `TokenUsage` contract (@deepseek-ai/dsh-llm). Counts are DISJOINT;
@@ -73,10 +73,10 @@ export function isCacheMiss(usage: CacheUsage | undefined, hasCacheEvidence = tr
 
 /** Approximate prefill cost attached to one line, in USD (models.dev list prices). */
 export interface LineCost {
-  /** Prompt cost of this Step (uncached input plus cache reads). */
-  step: number
-  /** Prompt cost of the whole Turn, over the loaded window. */
-  turn?: number
+  /** Which rebuild the amount describes: the Turn's context, one Step, or both. */
+  scope: 'turn' | 'step' | 'both'
+  /** Prompt cost of what was rebuilt, in USD. */
+  amount: number
   /** Prompt cost of the session, over the loaded window. */
   session?: number
 }
@@ -94,8 +94,8 @@ export interface LineFacts {
   step?: number
   /** Approximate amounts; omitted when the model has no list price. */
   cost?: LineCost
-  /** Tool-catalog change that rewrote the prompt prefix for this step, when known. */
-  toolChange?: ToolChange
+  /** Prompt-prefix change the core classified for this request, when known. */
+  prefixChange?: PrefixChangeKind
 }
 
 function formatIdle(ms: number): string {
@@ -211,17 +211,15 @@ export function formatLine(facts: LineFacts): string {
   const rebilled = `${formatTokens(facts.rebilledTokens)} tokens re-billed`
   const amounts: string[] = []
   if (cost !== undefined) {
-    if (cost.turn !== undefined) amounts.push(`turn ${amountText(cost.turn)}`)
-    amounts.push(`step ${amountText(cost.step)}`)
+    amounts.push(cost.scope === 'both' ? `(${amountText(cost.amount)})` : `(${cost.scope} ${amountText(cost.amount)})`)
   }
-  const body = amounts.length > 0 ? `${head} · ${rebilled} (${amounts.join(' · ')})` : `${head} · ${rebilled}`
+  const body = amounts.length > 0 ? `${head} · ${rebilled} ${amounts.join(' ')}` : `${head} · ${rebilled}`
   const tail: string[] = []
   if (typeof facts.cacheReadTokens === 'number' && facts.cacheReadTokens >= 0) {
     tail.push(`${formatCached(facts.cacheReadTokens)} cached`)
   }
   if ((facts.ttftMs ?? 0) > 0) tail.push(`ttft ${formatTtft(facts.ttftMs)} ↑`)
-  const tools = facts.toolChange === undefined ? undefined : formatToolChange(facts.toolChange)
-  if (tools !== undefined) tail.push(tools)
+  if (facts.prefixChange !== undefined) tail.push(formatPrefixChange(facts.prefixChange))
   if (cost?.session !== undefined) tail.push(`session (${amountText(cost.session)})`)
   return tail.length > 0 ? `${body} · ${tail.join(' · ')}` : body
 }
@@ -401,8 +399,8 @@ export interface LineInput {
   step?: number
   /** Approximate amounts; omitted when the model has no list price. */
   cost?: LineCost
-  /** Tool-catalog change that rewrote the prompt prefix for this step, when known. */
-  toolChange?: ToolChange
+  /** Prompt-prefix change the core classified for this request, when known. */
+  prefixChange?: PrefixChangeKind
   /** True when any prior turn exists (turn > 1; turn numbers are global and
    * monotonic, so window cropping or a missing turn/end must not turn a real
    * miss into a cold start). False means the first turn of a fresh cache,
@@ -452,10 +450,12 @@ export function getLineStatus(input: LineInput): LineStatus {
       ttftMs: input.ttftMs,
       ...(input.step === undefined ? {} : { step: input.step }),
       ...(input.cost === undefined ? {} : { cost: input.cost }),
-      ...(input.toolChange === undefined ? {} : { toolChange: input.toolChange }),
+      ...(input.prefixChange === undefined ? {} : { prefixChange: input.prefixChange }),
     }),
   }
 }
+
+
 
 
 

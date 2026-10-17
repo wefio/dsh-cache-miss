@@ -104,6 +104,30 @@ export function loadedPrefillTotals(
 }
 
 /**
+ * Usage of one loaded assistant record, looked up by Turn and Step.
+ *
+ * The notice decides which rebuild it pays for (the Turn's whole context or just
+ * this Step) from the Turn's first request, so that request's accounting is read
+ * straight out of the loaded window.
+ *
+ * @param nodes - loaded Conversation nodes, structurally.
+ * @param turn - owning Turn.
+ * @param step - owning Step.
+ * @returns the record's usage, or undefined when it is not loaded.
+ */
+export function loadedStepUsage(nodes: unknown, turn: number | undefined, step: number): UsageLike | undefined {
+  if (turn === undefined || !Array.isArray(nodes)) return undefined
+  for (const node of nodes) {
+    if (node === null || typeof node !== 'object') continue
+    const record = node as { kind?: unknown; turn?: unknown; step?: unknown; usage?: unknown }
+    if (record.kind !== 'assistant' || record.turn !== turn || record.step !== step) continue
+    if (record.usage === null || typeof record.usage !== 'object') continue
+    return record.usage as UsageLike
+  }
+  return undefined
+}
+
+/**
  * Format one USD amount, without the parentheses or symbol.
  *
  * Three decimals below one dollar keep sub-cent amounts visible (0.003), two
@@ -114,7 +138,11 @@ export function loadedPrefillTotals(
  */
 export function formatCost(usd: number): string {
   if (!Number.isFinite(usd) || usd <= 0) return '0.000'
-  return usd >= 0.1 ? usd.toFixed(2) : usd.toFixed(3)
+  // Whole dollars need cents; anything smaller needs the third decimal, which is
+  // where most single-request amounts live (~.067, ~.134).
+  return usd >= 1 ? usd.toFixed(2) : usd.toFixed(3)
 }
+
+
 
 

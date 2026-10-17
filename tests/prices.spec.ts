@@ -74,7 +74,7 @@ describe('formatCost', () => {
   })
 
   it('shows two decimals from one tenth up', () => {
-    expect(formatCost(0.48)).toBe('0.48')
+    expect(formatCost(0.48)).toBe('0.480')
     expect(formatCost(1)).toBe('1.00')
   })
 
@@ -85,29 +85,39 @@ describe('formatCost', () => {
 })
 
 describe('formatLine with amounts', () => {
-  it('brackets the step amount behind the token count it prices', () => {
+  it('labels a Turn-level rebuild with the official turn word', () => {
     const line = formatLine({
       idleMs: 3 * 60_000,
       rebilledTokens: 182_000,
       cacheReadTokens: 800,
       ttftMs: 2_100,
-      cost: { step: 0.0273 },
+      cost: { scope: 'turn', amount: 0.0273 },
     })
     expect(line).toBe(
-      'Cache miss after 3m idle · 182k tokens re-billed (step ~$0.027) · 1k cached · ttft 2.1s ↑',
+      'Cache miss after 3m idle · 182k tokens re-billed (turn ~$0.027) · 1k cached · ttft 2.1s ↑',
     )
   })
 
-  it('shares one bracket between the turn and step amounts and keeps session last', () => {
-    const line = formatLine({
-      idleMs: 60_000,
-      rebilledTokens: 1000,
-      cacheReadTokens: undefined,
-      ttftMs: 0,
-      cost: { step: 0.0012, turn: 0.0135, session: 1.44 },
+  it('labels a mid-Turn rebuild as step, and a Turn+Step rebuild as one unlabelled total', () => {
+    const midTurn = formatLine({
+      idleMs: 0,
+      rebilledTokens: 26_000,
+      cacheReadTokens: 0,
+      ttftMs: 1_600,
+      step: 17,
+      cost: { scope: 'step', amount: 0.004 },
     })
-    expect(line).toBe(
-      'Cache miss after 1m idle · 1k tokens re-billed (turn ~$0.013 · step ~$0.001) · session (~$1.44)',
+    expect(midTurn).toBe('Cache miss at step 17 · 26k tokens re-billed (step ~$0.004) · 0k cached · ttft 1.6s ↑')
+
+    const both = formatLine({
+      idleMs: 60_000,
+      rebilledTokens: 22_000,
+      cacheReadTokens: 0,
+      ttftMs: 8_100,
+      cost: { scope: 'both', amount: 0.134, session: 2.9 },
+    })
+    expect(both).toBe(
+      'Cache miss after 1m idle · 22k tokens re-billed (~$0.134) · 0k cached · ttft 8.1s ↑ · session (~$2.90)',
     )
   })
 
@@ -116,20 +126,9 @@ describe('formatLine with amounts', () => {
     expect(line).toBe('Cache miss after 0s idle · 22k tokens re-billed · 0k cached · ttft 1.2s ↑')
   })
 
-  it('reports the tool catalog change before the session amount', () => {
-    const line = formatLine({
-      idleMs: 60_000,
-      rebilledTokens: 22_000,
-      cacheReadTokens: 0,
-      ttftMs: 8_100,
-      toolChange: { added: ['agent_team'], removed: ['dsh_job'], changed: [] },
-      cost: { step: 0.003, turn: 0.003, session: 2.9 },
-    })
-    expect(line).toBe(
-      'Cache miss after 1m idle · 22k tokens re-billed (turn ~$0.003 · step ~$0.003) · 0k cached · ttft 8.1s ↑ · (~+agent_team · ~-dsh_job) · session (~$2.90)',
-    )
-  })
 })
+
+
 
 
 

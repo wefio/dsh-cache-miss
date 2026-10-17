@@ -13,17 +13,18 @@ DSH 网页插件：在一轮的**第一条 assistant 回复**正下方，以一�
 本插件在轮首第一条 assistant 回复正下方，仅当该请求确为缓存未命中时渲染一条黄色单行：
 
 ```
-Cache miss after 3m idle · 182k tokens re-billed (turn ~$0.031 · step ~$0.027) · 0.8k cached · ttft 2.1s ↑ · (~+agent_team · ~-dsh_job) · session (~$2.90)
+Cache miss after 3m idle · 182k tokens re-billed (turn ~$0.027) · 0.8k cached · ttft 2.1s ↑ · (~tools) · session (~$2.90)
 ```
 ![缓存未命中提示](cache-miss.png)
 
 - `idle` —— 距上一轮结束的空闲时长。
 - `re-billed` —— 该请求未命中缓存的输入 token 数（缩写为 k）。
-- `(turn … · step …)` —— 整轮与本步的近似金额，共用一组括号，直接沿用官方术语 `turn` / `step`；`~` 明示估算。
+- `(turn ~$…)` / `(step ~$…)` —— 被重建的那部分上下文的近似金额：轮首请求 miss 标 `turn`（整段上下文重建），
+  轮中某步 miss 标 `step`（只有该步改动的前缀重建），同一轮两者都重建过就直接给合计 `(~$…)`；`~` 明示估算。
 - `cached` —— 同一 prefill 中命中缓存的部分（provider 回报时显示），让“重算量 vs 命中量”一目了然。
 - `ttft` —— 首 token 时延（取自 assistant timing，可用时显示）；上箭头示意重建 prefill 通常更慢。
-- `(~+tool · ~-tool · ~±tool)` —— 本次请求的**工具清单变更**（新增 / 移除 / 同名但 schema 变了）。
-  DeepSeek 按前缀命中缓存，工具目录属于前缀，变一个就从变化点往后全部重算，所以这是 miss 最常见的原因。
+- `(~system)` / `(~tools)` / `(~system+tools)` —— 核心对本次请求的**前缀变更分类**（系统提示 / 工具目录，
+  两者都属于缓存前缀，任一处变了都会让之后全部重算，所以这是 miss 最常见的原因）。分类由核心给出，插件只转述。
 - `session (~$…)` —— 会话级近似金额（已载入窗口口径）。
 
 价格取自 [models.dev](https://models.dev/api.json) 的 DeepSeek 价目快照，直接按它的美元单价显示（不做汇率换算，`~` 明示估算）；快照随包发布，不在浏览器里请求外部接口。峰谷/节假日这类分时价是单一供应商的定价策略，插件不写死；模型匹配不到价目表时不显示金额（不编价格）。金额只算 prompt 部分（未命中输入 + 命中缓存读），不含输出 token。
@@ -55,6 +56,7 @@ dsh plugin --profile web add dsh-cache-miss
 - TTFT 是 step 的 `step/start` 事件到首个非空 token delta 事件的墙钟间隔，取自会话事件时间；当任一边界落在已加载窗口之外时视为缺省（不显示 `· ttft ...` 段）。
 - 节点对每个 assistant step 都会发布，但命中时渲染为空，因此命中轮不产生可见行；每一步至多输出一条控制台日志。
 - 从未出现 cache 字段的 provider 首次出现时显示一次灰色“无法确认”提示，不做启发式猜测——TTFT 受网络/负载影响，无法可靠区分"cache miss 导致慢"与"本来就慢"。
+
 
 
 

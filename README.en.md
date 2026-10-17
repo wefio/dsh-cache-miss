@@ -19,7 +19,7 @@ This plugin renders, under each assistant reply whose request missed, a single
 yellow line, live, as soon as that step's `usage` chunk arrives:
 
 ```
-Cache miss after 3m idle · 182k tokens re-billed (turn ~$0.031 · step ~$0.027) · 0.8k cached · ttft 2.1s ↑ · (~+agent_team · ~-dsh_job) · session (~$2.90)
+Cache miss after 3m idle · 182k tokens re-billed (turn ~$0.027) · 0.8k cached · ttft 2.1s ↑ · (~tools) · session (~$2.90)
 ```
 ![cache-miss notice](cache-miss.png)
 
@@ -27,14 +27,16 @@ Cache miss after 3m idle · 182k tokens re-billed (turn ~$0.031 · step ~$0.027)
 - `re-billed` — the request's uncached input tokens (abbreviated to k).
 - `cached` — the cached-read portion of the same prefill (when the provider
   reports it), so the rebilled-vs-cached split stays unambiguous.
-- `(turn … · step …)` — the approximate amounts of the whole Turn and of this Step,
-  sharing one bracket and the official `turn` / `step` words; `~` marks an estimate.
+- `(turn ~$…)` / `(step ~$…)` — the approximate amount of the rebuilt part: a miss on the
+  Turn's first request rebuilt the whole context (`turn`), a mid-Turn miss only the prefix it
+  changed (`step`); when both happened in the same Turn the line gives their sum `(~$…)` with
+  no scope word. `~` marks an estimate.
 - `ttft` — first-token latency, when available; the up arrow hints a rebuild
   prefill usually ran slower.
-- `(~+tool · ~-tool · ~±tool)` — the request's **tool catalog change** (added /
-  removed / same name with a different schema). DeepSeek caches by prefix and the
-  tool catalog is part of it, so one moved tool re-bills everything after it — the
-  most common cause of a miss.
+- `(~system)` / `(~tools)` / `(~system+tools)` — the core's **prefix change classification** for
+  this request (system prompt / tool catalog; both are part of the cache prefix, so a change
+  re-bills everything after it — the most common cause of a miss). The classification comes from
+  the core; the plugin only reports it.
 - `session (~$…)` — the session-level approximate amount, over the loaded window.
 
 Prices come from the [models.dev](https://models.dev/api.json) DeepSeek snapshot and
@@ -98,6 +100,7 @@ Restart `dsh web` (or hard-refresh the running GUI) to load the client bundle.
 - Providers that have never reported cache fields get one grey notice per
   provider and no heuristic guess: TTFT is too sensitive to network/load to
   reliably separate "slow because of a cache miss" from "just slow".
+
 
 
 

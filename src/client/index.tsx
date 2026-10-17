@@ -7,11 +7,11 @@ import { cacheMissDefinition, type CacheMissNodeData } from './cache-miss-node'
 import {
   deriveTurnTimingFacts, formatDebugLine, formatLocalTime, getLineStatus, hasCacheFields, isDebugEnabled,
   resolveTurnTimings, turnProcessSelector, ttftMs,
-  type LineCost,
   type LineStatus,
 } from './logic'
-import { loadedPrefillTotals, prefillCost, resolveModelPrice, totalOf } from './prices'
-import { createPrefixDefinition, readToolChange, type PromptInspector } from './prefix-node'
+import { loadedPrefillTotals, prefillCost, resolveModelPrice } from './prices'
+import { lineCost } from './line-cost'
+import { createPrefixDefinition, createSystemPromptDefinition, readPrefixChange, type PromptInspector, type SystemInspector } from './prefix-node'
 
 /** Yellow cache-miss single line rendered under the turn's first assistant. */
 const LINE_STYLE = {
@@ -334,20 +334,19 @@ function CacheMissLine(props: CacheMissLineProps): React.ReactElement | null {
   const price = resolveModelPrice(data?.model)
   const stepCost = price === undefined || data?.usage === undefined ? undefined : prefillCost(price, data.usage)
   const totals = price === undefined ? undefined : loadedPrefillTotals(loadedNodes, price, data?.turn)
-  const cost: LineCost | undefined = stepCost === undefined ? undefined : {
-    step: totalOf(stepCost),
-    ...(totals === undefined ? {} : { turn: totals.turn, session: totals.session }),
-  }
+  const cost = data === undefined
+    ? undefined
+    : lineCost(data.turn, data.step, price, stepCost, totals, loadedNodes)
   // What the request changed in the prompt prefix (the usual cause of a miss);
-  // recorded by the request-header Definition and handed over by `turn:step`.
-  const toolChange = data === undefined ? undefined : readToolChange(data.turn, data.step)
+  // classified by the core, recorded by the header Definitions, keyed by `turn:step`.
+  const prefixChange = data === undefined ? undefined : readPrefixChange(data.turn, data.step)
   const decided: LineStatus = data === undefined ? { kind: 'hidden' } : getLineStatus({
     usage: data.usage,
     idleMs: timing.idleMs,
     ttftMs: stepTtft,
     step: data.step,
     ...(cost === undefined ? {} : { cost }),
-    ...(toolChange === undefined ? {} : { toolChange }),
+    ...(prefixChange === undefined ? {} : { prefixChange }),
     hasPriorTurn: timing.hasPriorTurn,
     hasCacheEvidence,
   })
@@ -455,6 +454,7 @@ export const inject = ['slots']
 interface CacheMissRegistry {
   register(definition: unknown): () => void
   inspectRequestPrompt?: PromptInspector
+  inspectSystemPrompt?: SystemInspector
 }
 
 /** Structural registry read across the two core service names. */
@@ -475,12 +475,19 @@ function registerCacheMissDefinition(
       register?: (definition: unknown) => () => void
       events?: unknown
       inspectRequestPrompt?: unknown
+      inspectSystemPrompt?: unknown
     }
-    const inspect = typeof node.inspectRequestPrompt === 'function'
+    const prompt = typeof node.inspectRequestPrompt === 'function'
       ? (node.inspectRequestPrompt as PromptInspector)
       : undefined
-    const withInspect = (registry: CacheMissRegistry): CacheMissRegistry =>
-      inspect === undefined ? registry : { register: registry.register, inspectRequestPrompt: inspect }
+    const system = typeof node.inspectSystemPrompt === 'function'
+      ? (node.inspectSystemPrompt as SystemInspector)
+      : undefined
+    const withInspect = (registry: CacheMissRegistry): CacheMissRegistry => ({
+      register: registry.register,
+      ...(prompt === undefined ? {} : { inspectRequestPrompt: prompt }),
+      ...(system === undefined ? {} : { inspectSystemPrompt: system }),
+    })
     if (typeof node.register === 'function') {
       return withInspect({ register: node.register.bind(node) })
     }
@@ -533,15 +540,25 @@ export function apply(ctx: Context): void {
         } catch (error) {
           console.warn('[dsh-cache-miss] failed to register the cache-miss node; cache-miss lines are disabled.', error)
         }
-        // Prefix-change tracking needs the core's canonical prompt interpretation;
-        // without it the notice line simply carries no tool segment.
-        const inspect = registry.inspectRequestPrompt
-        if (inspect !== undefined) {
+        // Prefix-change reporting needs the core's canonical prompt interpretation
+        // (which in turn needs the effective system prompt). Both are best-effort:
+        // a core without them simply produces a line without that segment.
+        const inspectSystem = registry.inspectSystemPrompt
+        const inspectPrompt = registry.inspectRequestPrompt
+        if (inspectSystem !== undefined) {
           try {
-            const dispose = registry.register(createPrefixDefinition(inspect.bind(registry)))
+            const dispose = registry.register(createSystemPromptDefinition(inspectSystem.bind(registry)))
             ctx.effect(() => dispose)
           } catch (error) {
-            console.warn('[dsh-cache-miss] failed to register the request-prefix tracker; tool changes stay unreported.', error)
+            console.warn('[dsh-cache-miss] failed to register the system-prompt tracker; prefix changes stay unreported.', error)
+          }
+        }
+        if (inspectPrompt !== undefined) {
+          try {
+            const dispose = registry.register(createPrefixDefinition(inspectPrompt.bind(registry)))
+            ctx.effect(() => dispose)
+          } catch (error) {
+            console.warn('[dsh-cache-miss] failed to register the request-prefix tracker; prefix changes stay unreported.', error)
           }
         }
       })
@@ -552,6 +569,12 @@ export function apply(ctx: Context): void {
     }, CacheMissLine)
   })
 }
+
+
+
+
+
+
 
 
 

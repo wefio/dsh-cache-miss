@@ -1,31 +1,32 @@
 import type {
   ConversationNodeContext, ConversationNodeDefinition, ConversationPromptSnapshot, RequestPromptInspection,
+  SystemPromptState,
 } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { SessionEvent } from '@deepseek-ai/dsh-session/types'
-import { diffTools, isEmptyToolChange, type ToolChange } from './prefix'
+import { prefixChangeKind, type PrefixChangeKind } from './prefix'
 
 /**
- * Latest tool-catalog change per Turn:step, keyed `turn:step`.
+ * Latest prompt-prefix change per Turn:step, keyed `turn:step`.
  *
- * The line renderer cannot read another Definition's Context, so this small
- * registry is the hand-off: the request-header Definition writes, the keyed Chat
- * node reads by its own `turn`/`step`. Entries are bounded because a long page
- * load would otherwise keep one record per request forever.
+ * The notice renderer cannot read another Definition's Context, so this small
+ * registry is the hand-off: the header Definitions write, the keyed Chat node
+ * reads by its own `turn`/`step`. Entries are bounded because a long page load
+ * would otherwise keep one record per request forever.
  */
-const prefixChanges = new Map<string, ToolChange>()
+const prefixChanges = new Map<string, PrefixChangeKind>()
 
 /** Upper bound on retained records; the map is a cache, not a log. */
 const MAX_RECORDS = 500
 
-/** Read one step's tool change, when the current request rewrote the catalog. */
-export function readToolChange(turn: number, step: number): ToolChange | undefined {
+/** Read one step's prefix change, when the request rewrote the prompt prefix. */
+export function readPrefixChange(turn: number, step: number): PrefixChangeKind | undefined {
   return prefixChanges.get(`${turn}:${step}`)
 }
 
 /** Record one step's change, dropping the oldest records past the bound. */
-function recordToolChange(key: string, change: ToolChange): void {
+function recordPrefixChange(key: string, kind: PrefixChangeKind): void {
   prefixChanges.delete(key)
-  prefixChanges.set(key, change)
+  prefixChanges.set(key, kind)
   while (prefixChanges.size > MAX_RECORDS) {
     const oldest = prefixChanges.keys().next().value
     if (oldest === undefined) break
@@ -33,26 +34,15 @@ function recordToolChange(key: string, change: ToolChange): void {
   }
 }
 
-/** Minimal request-header event shape this Definition reads. */
-interface RequestHeaderEvent {
-  readonly type?: unknown
-  readonly seq?: unknown
-}
-
 /** Canonical prompt interpretation supplied by the uiConversation service. */
 export type PromptInspector = (
   previous: ConversationPromptSnapshot | undefined,
   event: SessionEvent<'request/header'>,
-  system: undefined,
+  system: unknown,
 ) => RequestPromptInspection
 
-/** One request header's retained prompt state. */
-interface PrefixState {
-  /** `turn:step` the header belongs to, when the engine resolved one. */
-  readonly stepKey: string | undefined
-  /** Canonical prompt in force for this request. */
-  readonly prompt: ConversationPromptSnapshot
-}
+/** System-prompt interpretation supplied by the uiConversation service. */
+export type SystemInspector = (previous: SystemPromptState | undefined, event: SessionEvent) => SystemPromptState
 
 /** Turn:step key from one resolved Match location, when it names a step. */
 function stepKeyOf(location: unknown): string | undefined {
@@ -63,44 +53,73 @@ function stepKeyOf(location: unknown): string | undefined {
   return typeof turn === 'number' && typeof step === 'number' ? `${turn}:${step}` : undefined
 }
 
+/** Retained request-header state: the canonical prompt this request sent. */
+interface HeaderState {
+  /** Canonical prompt in force for this request. */
+  readonly prompt: ConversationPromptSnapshot
+}
+
 /**
- * Conversation Definition that records what each request changed in the prompt
- * prefix.
+ * Definition retaining the effective system prompt.
  *
- * DeepSeek bills a cache miss for every token after the first changed byte, and
- * the usual cause is the tool catalog moving (a plugin, skill or agent tool
- * appears or disappears). The engine hands every request header to Definitions
- * and the uiConversation service canonicalizes it against the previous prompt, so
- * the change is read here once and handed to the notice line — no DOM, no diff of
- * the rendered conversation.
+ * The header inspector needs the system prompt in force to tell a system change
+ * from a tool change, and the core hands out `inspectSystemPrompt` for exactly
+ * that interpretation — so this Definition stores the core's own answer rather
+ * than rebuilding prompt semantics from raw messages.
  *
- * The Definition publishes no view node: it exists only for this record.
- *
- * @param inspect - `uiConversation.inspectRequestPrompt`, injected as a value seam
- *   because a client bundle cannot value-import another package's module.
+ * @param inspect - `uiConversation.inspectSystemPrompt`.
  */
-export function createPrefixDefinition(inspect: PromptInspector): ConversationNodeDefinition<PrefixState> {
+export function createSystemPromptDefinition(inspect: SystemInspector): ConversationNodeDefinition<SystemPromptState> {
   return {
-    kind: 'cache-miss-prefix',
+    kind: 'cache-miss-system',
     target: 'chat',
     match: (event) => {
-      if ((event as RequestHeaderEvent).type !== 'request/header') return null
+      const record = event as { type?: unknown; surfaceOp?: unknown }
+      const isSystemMessage = record.type === 'system/message'
+      const isReplacement = 'surfaceOp' in record && record.surfaceOp !== 'append'
+      if (!isSystemMessage && !isReplacement) return null
       const seq = (event as { seq?: unknown }).seq
-      return { id: String(typeof seq === 'number' ? seq : 'header'), role: 'start' }
+      return { id: String(typeof seq === 'number' ? seq : 'system'), role: 'start' }
     },
-    start: (_context: ConversationNodeContext<PrefixState>, match, reader) => {
-      const event = match.event as SessionEvent<'request/header'>
-      const previous = reader.previous<PrefixState>('cache-miss-prefix')?.state?.prompt
-      const inspection = inspect(previous, event, undefined)
-      const key = stepKeyOf(match.location)
-      if (key !== undefined) {
-        const change = diffTools(previous?.tools, inspection.prompt.tools)
-        if (!isEmptyToolChange(change)) recordToolChange(key, change)
-      }
-      return { stepKey: key, prompt: inspection.prompt }
+    start: (_context: ConversationNodeContext<SystemPromptState>, match, reader) => {
+      const previous = reader.previous<SystemPromptState>('cache-miss-system')?.state
+      return inspect(previous, match.event as SessionEvent)
     },
     update: (context) => context.state,
     buildViewNode: () => null,
   }
 }
 
+/**
+ * Definition that records how each request changed the prompt prefix.
+ *
+ * Only the core's classification is kept: `system` / `tools` /
+ * `system-and-tools`. Naming individual tools would mean diffing catalog
+ * snapshots ourselves, which ties the plugin to more core internals than the
+ * notice is worth.
+ *
+ * @param inspect - `uiConversation.inspectRequestPrompt`.
+ */
+export function createPrefixDefinition(inspect: PromptInspector): ConversationNodeDefinition<HeaderState> {
+  return {
+    kind: 'cache-miss-prefix',
+    target: 'chat',
+    match: (event) => {
+      if ((event as { type?: unknown }).type !== 'request/header') return null
+      const seq = (event as { seq?: unknown }).seq
+      return { id: String(typeof seq === 'number' ? seq : 'header'), role: 'start' }
+    },
+    start: (_context: ConversationNodeContext<HeaderState>, match, reader) => {
+      const event = match.event as SessionEvent<'request/header'>
+      const previous = reader.previous<HeaderState>('cache-miss-prefix')?.state?.prompt
+      const system = reader.previous<SystemPromptState>('cache-miss-system')?.state?.effective
+      const inspection = inspect(previous, event, system)
+      const kind = prefixChangeKind(inspection.change?.kind)
+      const key = stepKeyOf(match.location)
+      if (kind !== undefined && key !== undefined) recordPrefixChange(key, kind)
+      return { prompt: inspection.prompt }
+    },
+    update: (context) => context.state,
+    buildViewNode: () => null,
+  }
+}

@@ -55,18 +55,20 @@ cache 字段,插件无法区分「完全 miss」与「命中但不报明细」,�
 轮首第一条 assistant 回复正下方,渲染一条黄色等宽单行,形如:
 
 ```
-Cache miss after 3m idle · 182k tokens re-billed (turn ~$0.031 · step ~$0.027) · 0.8k cached · ttft 2.1s ↑ · (~+agent_team · ~-dsh_job) · session (~$2.90)
+Cache miss after 3m idle · 182k tokens re-billed (turn ~$0.027) · 0.8k cached · ttft 2.1s ↑ · (~tools) · session (~$2.90)
 ```
 
 - `idle`:距上一轮结束的空闲时长,>= 60s 显示为分钟,否则为秒。
 - `re-billed`:该请求 `inputTokens`(未命中部分)的千分位缩写(k)。
-- `(turn … · step …)`:本步与整轮的近似金额,共用一组括号、直接用官方术语 `turn` / `step`;
-  只算 **prompt 部分**(未命中输入 + 命中的缓存读),不含 output——本插件关心的是缓存成本,
-  三个层级同口径才可比。金额以 `~` 明示估算,`$` 即 models.dev 的美元单价。
+- `(turn ~$…)` / `(step ~$…)`:被重建的那部分的近似金额,沿用官方术语。miss 发生在轮首
+  请求 → 整段上下文被重建,标 `turn`;发生在轮中某步 → 只有该步改动的前缀被重建,标 `step`;
+  同一轮两者都重建过 → 直接给合计 `(~$…)`,不并列两个词让读者自己加。金额只算
+  **prompt 部分**(未命中输入 + 命中的缓存读),不含 output——本插件关心的是缓存成本,
+  各层级同口径才可比。`~` 明示估算,`$` 即 models.dev 的美元单价。
 - `cached`:该请求 `cacheReadTokens`(命中部分)的千分位缩写(k),provider 未回报时不显示。
-- `(~+tool · ~-tool · ~±tool)`:本次请求的**工具清单变更**——`+` 新增、`-` 移除、`±` 同名但
-  description/parameters 变了。工具目录是 prompt 前缀的一部分,变一个就从变化点往后全部失效,
-  所以这是 miss 最常见的原因。超过 3 个名字折叠成 `~+N more`。
+- `(~system)` / `(~tools)` / `(~system+tools)`:核心对本次请求的**前缀变更分类**。系统提示和
+  工具目录都属于前缀,任一处变了就从变化点往后全部失效,所以这是 miss 最常见的原因。
+  分类原样来自核心,插件不做二次推断(理由见「前缀变更检测」)。
 - `session (~$…)`:会话级近似金额(已载入窗口口径)。
 - `ttft`:该条 assistant 首 token 时延(TTFT)= 首个 token 事件时间 - `step/start`
   事件时间,秒、一位小数,末尾加向上箭头示意重建 prefill 通常更慢;边界缺失时不显示该段。
@@ -77,9 +79,9 @@ Cache miss after 3m idle · 182k tokens re-billed (turn ~$0.031 · step ~$0.027)
   重试、压缩等)时,后面的 step 同样会判为 miss。它们也各出一条,文案为
   `Cache miss at step N: …`:轮级 `idle`(距上一轮结束)对轮中事件没有意义,改用 step 号
   定位。同一轮的多条提示按 step 升序紧贴该轮的过程摘要行排列。
-- **step / turn / session 三级就是段**:不做表格。step 与 turn 的金额共用 re-billed 后面的
-  一组括号,session 追加为末尾一段;turn / session 取自已载入的 assistant 记录
-  (`legacy.nodes`)按当前模型单价求和——"已载入窗口"口径,不是逐笔账单。
+- **step / turn / session 三级就是段**:不做表格。重建金额紧跟在 re-billed 后面,
+  `session` 追加为末尾一段,取自已载入的 assistant 记录(`legacy.nodes`)按当前模型单价
+  求和——"已载入窗口"口径,不是逐笔账单。
 - 纯文本,无 emoji,不自动消失,刷新页面后随会话投影自然消失。
 
 当 provider 回 usage 但不回 `cacheReadTokens`/`cacheWriteTokens`,且从未出现过任何
@@ -93,22 +95,27 @@ provider 一次的更详细 warning(含 turn/step、provider、`inputTokens` 与
 ## 前缀变更检测
 
 DeepSeek 按前缀命中缓存:系统提示或**工具目录**任一处变了,变化点之后的 token 全部按 miss 计费。
-0.2 起的核心把这件事算好了但只存在于"轨迹"视图:每个请求的 `request/header` 事件会被
-`uiConversation.inspectRequestPrompt(previous, event, system)` 规范化成一个快照
-`{ config, system, tools }`,并给出 `change.kind`(`system` / `tools` / `system-and-tools`)。
+0.2 起的核心已经把这件事算好了(只是目前只喂给"轨迹"视图):每个请求的 `request/header` 事件经
+`uiConversation.inspectRequestPrompt(previous, event, system)` 规范化成 `{ config, system, tools }`,
+并直接给出 `change.kind`(`system` / `tools` / `system-and-tools`)。
 
-插件因此注册第二个 Definition(`kind: cache-miss-prefix`,`target: chat`,不发布节点):
+插件只**转述这个结论**,不自己再算一遍:
 
-- `match`:只认 `request/header`,以事件 `seq` 作 id;
-- `start`:用 `reader.previous('cache-miss-prefix')` 取上一个请求的快照,调用上面的 inspector,
-  再把 `previous.tools` 与当前 `prompt.tools` 按 name + description/parameters 做差;
-- 结果写进模块级 map(键 `turn:step`,从 `match.location` 推出,上限 500 条),渲染层按自己的
-  `turn`/`step` 取用,拼成 `(~+tool · ~-tool · ~±tool)` 段。
+- Definition `cache-miss-system`(`target: chat`,不发布节点):`match` 系统消息与 surface 替换事件,
+  用 `uiConversation.inspectSystemPrompt` 保留"当前生效的系统提示"——header inspector 需要它才
+  分得清 system 与 tools;
+- Definition `cache-miss-prefix`:只 `match` `request/header`,用 `reader.previous(...)` 取上一个
+  请求快照与上一步的系统提示,调上面的 inspector,把 `change.kind` 写进模块级 map
+  (键 `turn:step`,上限 500 条),渲染层按自己的 `turn`/`step` 取用,拼成 `(~tools)` 这类段。
 
-已知边界:这是**客户端** diff,map 以 `turn:step` 为键,同页打开两个**不同会话**且轮号撞车时
-原因段可能张冠李戴(极低概率,只影响这段文字);`inspectRequestPrompt` 不存在的旧核心上自动
-不注册,行里也就没有这一段——其余功能不受影响。
+为什么不做工具级 diff:那需要自己按 name + `description`/`parameters` 比较两份工具 schema,
+等于把插件绑死在核心的 `ToolSchema` 形状和 inspector 的返回结构上。核心一改,插件就炸;
+而"到底是 tools 变了还是 system 变了"这个信息核心本来就已经算好、稳定、且足够解释一次 miss。
+少借一点核心内部结构,就少一个会崩的地方。
 
+已知边界:map 以 `turn:step` 为键,同页打开两个**不同会话**且轮号撞车时,这段文字可能张冠李戴
+(极低概率,只影响这一个词);旧核心上若没有这两个 inspector,插件自动不注册对应 Definition,
+行里没有这一段——其余功能不受影响。
 ## 计价口径
 
 价格取自 [models.dev](https://models.dev/api.json) 的 `deepseek` provider 快照,由
@@ -243,6 +250,7 @@ idle 时长按快照形状取:先读 chat 快照的 `turnTimings`(顶层),没有
 - 不使用 emoji。
 - 不修改 DSH 源码、不逆向侵入 `turnTail` 链。
 - 类型仅来自官方 npm SDK。测试使用 vitest。
+
 
 
 
