@@ -34,7 +34,23 @@ jobs:
         run: pnpm test
 
       - name: Publish to npm
-        run: npm publish
+        run: |
+          # npm's publish is asynchronous and the registry may not answer for a
+          # while ("Your package is being processed"). A retry in that window
+          # fails E409 "Cannot publish over previously staged version", and a
+          # rerun of an already-published tag fails the same way — neither means
+          # the release is broken, so both are only accepted when the exact
+          # version is on the registry.
+          if npm publish; then
+            exit 0
+          fi
+          VERSION="$(node -p "require('./package.json').version")"
+          if npm view "dsh-cache-miss@${VERSION}" version >/dev/null 2>&1; then
+            echo "dsh-cache-miss@${VERSION} is already on the registry; treating the failed publish as a retry."
+            exit 0
+          fi
+          echo "npm publish failed and dsh-cache-miss@${VERSION} is not on the registry"
+          exit 1
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
@@ -42,6 +58,9 @@ jobs:
         run: pnpm pack:latest
 
       - name: Create GitHub Release
-        run: gh release create "$GITHUB_REF_NAME" "dsh-cache-miss.tgz" --repo "$GITHUB_REPOSITORY" --generate-notes
+        run: |
+          # A rerun finds the release from the first attempt; that is success too.
+          gh release create "$GITHUB_REF_NAME" "dsh-cache-miss.tgz" --repo "$GITHUB_REPOSITORY" --generate-notes \
+            || gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
