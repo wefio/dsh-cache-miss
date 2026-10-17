@@ -55,13 +55,13 @@ cache 字段,插件无法区分「完全 miss」与「命中但不报明细」,�
 轮首第一条 assistant 回复正下方,渲染一条黄色等宽单行,形如:
 
 ```
-Cache miss after 3m idle: 182k tokens re-billed (~¥0.20) · 0.8k cached · ttft 2.1s ↑ · 轮 (~¥0.31) · 会话 (~¥2.90)
+Cache miss after 3m idle: 182k tokens re-billed (~$0.027) · 0.8k cached · ttft 2.1s ↑ · 轮 (~$0.043) · 会话 (~$0.40)
 ```
 
 - `idle`:距上一轮结束的空闲时长,>= 60s 显示为分钟,否则为秒。
 - `re-billed`:该请求 `inputTokens`(未命中部分)的千分位缩写(k)。
 - `cached`:该请求 `cacheReadTokens`(命中部分)的千分位缩写(k),provider 未回报时不显示。
-- `(~¥…)`:该 token 桶的近似金额,永远放在括号里、以 `~` 明示是估算;token 数本身不加括号。
+- `(~$…)`:该 token 桶的近似金额,永远放在括号里、以 `~` 明示是估算;token 数本身不加括号。
   金额只算 **prompt 部分**(未命中输入 + 命中的缓存读),不含 output——本插件关心的是缓存成本,
   三个层级的金额采用同一口径才可比。
 - `ttft`:该条 assistant 首 token 时延(TTFT)= 首个 token 事件时间 - `step/start`
@@ -94,7 +94,7 @@ API:那会给每次翻页多一个跨域请求,而且供应商接口抖动不该
 
 - 金额 = 未命中输入 × `input` + 命中的缓存读 × `cache_read` + 缓存写入 × `input`,
   单价为 models.dev 的 USD / 1M token;
-- 显示按固定汇率折算人民币(`CNY_PER_USD = 7.2`),`~` 明示估算,实际扣费以账单为准;
+- 直接显示美元(models.dev 的计价口径),`~` 明示是本地估算,实际扣费以账单为准;不做汇率换算,少一层猜测;
 - 不做峰谷/节假日分时计价:那是单一供应商的定价策略,插件不为任何供应商写死时段规则;
 - 输出 token 不计入金额——提示行回答的是"这次 prompt 花了多少";
 - 模型名匹配不到快照时不显示金额(宁可没有,不编一个),其余字段照常;
@@ -220,3 +220,5 @@ idle 时长按快照形状取:先读 chat 快照的 `turnTimings`(顶层),没有
 - 不使用 emoji。
 - 不修改 DSH 源码、不逆向侵入 `turnTail` 链。
 - 类型仅来自官方 npm SDK。测试使用 vitest。
+
+

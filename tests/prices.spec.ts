@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import {
-  CNY_PER_USD,
   formatCost,
   loadedPrefillTotals,
   prefillCost,
@@ -69,12 +68,14 @@ describe('loadedPrefillTotals', () => {
 })
 
 describe('formatCost', () => {
-  it('shows three decimals below one yuan so sub-cent amounts stay visible', () => {
-    expect(formatCost(0.001 / CNY_PER_USD)).toBe('0.001')
+  it('shows three decimals below one dollar so sub-cent amounts stay visible', () => {
+    expect(formatCost(0.001)).toBe('0.001')
+    expect(formatCost(0.0523)).toBe('0.052')
   })
 
-  it('shows two decimals from one yuan up', () => {
-    expect(formatCost(1 / CNY_PER_USD)).toBe('1.00')
+  it('shows two decimals from one tenth up', () => {
+    expect(formatCost(0.48)).toBe('0.48')
+    expect(formatCost(1)).toBe('1.00')
   })
 
   it('never renders a negative or non-finite amount', () => {
@@ -93,7 +94,7 @@ describe('formatLine with amounts', () => {
       cost: { rebilled: 0.0273, cached: 0.0000024 },
     })
     expect(line).toBe(
-      'Cache miss after 3m idle: 182k tokens re-billed (~¥0.20) · 1k cached · ttft 2.1s ↑',
+      'Cache miss after 3m idle: 182k tokens re-billed (~$0.027) · 1k cached · ttft 2.1s ↑',
     )
   })
 
@@ -103,9 +104,9 @@ describe('formatLine with amounts', () => {
       rebilledTokens: 1000,
       cacheReadTokens: undefined,
       ttftMs: 0,
-      cost: { rebilled: 0.00015, cached: undefined, turn: 0.0135, session: 1.44 },
+      cost: { rebilled: 0.0012, cached: undefined, turn: 0.0135, session: 1.44 },
     })
-    expect(line).toBe('Cache miss after 1m idle: 1k tokens re-billed (~¥0.001) · 轮 (~¥0.097) · 会话 (~¥10.37)')
+    expect(line).toBe('Cache miss after 1m idle: 1k tokens re-billed (~$0.001) · 轮 (~$0.013) · 会话 (~$1.44)')
   })
 
   it('shows no amounts at all when the model has no list price', () => {
@@ -113,5 +114,6 @@ describe('formatLine with amounts', () => {
     expect(line).toBe('Cache miss after 0s idle: 22k tokens re-billed · 0k cached · ttft 1.2s ↑')
   })
 })
+
 
 

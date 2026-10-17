@@ -2,17 +2,10 @@ import { MODEL_PRICES, type ModelPrice } from './prices.gen'
 
 export { MODEL_PRICES, PRICE_SNAPSHOT, PRICE_SOURCE, type ModelPrice } from './prices.gen'
 
-/**
- * USD → CNY conversion used for the displayed amounts.
- *
- * models.dev publishes list prices in USD, while the line shows approximate RMB.
- * A fixed conversion keeps the display free of a network call; the `~` prefix on
- * every amount marks it as an estimate (the provider's own invoice is authoritative).
- */
-export const CNY_PER_USD = 7.2
-
-/** Currency symbol shown in front of every amount. */
-export const CURRENCY = '¥'
+/** Currency symbol shown in front of every amount. models.dev prices are USD,
+ * so the line shows USD too: one less approximation between the catalog and the
+ * reader, and nothing to guess about exchange rates. */
+export const CURRENCY = '$'
 
 /** Token accounting read structurally, so this module needs no contract import. */
 export interface UsageLike {
@@ -111,17 +104,17 @@ export function loadedPrefillTotals(
 }
 
 /**
- * Format one USD amount as approximate RMB, without the parentheses or symbol.
+ * Format one USD amount, without the parentheses or symbol.
  *
- * Three decimals below one yuan keep sub-cent amounts visible (0.003), two
+ * Three decimals below one dollar keep sub-cent amounts visible (0.003), two
  * decimals above keep the line short.
  *
  * @param usd - amount in USD, as models.dev publishes it.
- * @returns the amount in CNY, as digits only.
+ * @returns digits only.
  */
 export function formatCost(usd: number): string {
-  const cny = usd * CNY_PER_USD
-  if (!Number.isFinite(cny) || cny <= 0) return '0.000'
-  return cny >= 1 ? cny.toFixed(2) : cny >= 0.1 ? cny.toFixed(2) : cny.toFixed(3)
+  if (!Number.isFinite(usd) || usd <= 0) return '0.000'
+  return usd >= 0.1 ? usd.toFixed(2) : usd.toFixed(3)
 }
+
 

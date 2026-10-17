@@ -196,7 +196,7 @@ function amount(usd: number | undefined): string {
  * missed because something invalidated the cache mid-Turn, so it is reported by
  * step instead: the Turn-level gap says nothing about that step.
  *
- * Amounts are approximate RMB derived from the models.dev list price, so they
+ * Amounts are approximate USD derived from the models.dev list price, so they
  * ride in brackets behind the token counts they price; levels stack as further
  * segments (`轮` / `会话`), never as a table.
  *
@@ -448,4 +448,5 @@ export function getLineStatus(input: LineInput): LineStatus {
     }),
   }
 }
+
 

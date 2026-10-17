@@ -19,7 +19,7 @@ This plugin renders, under each assistant reply whose request missed, a single
 yellow line, live, as soon as that step's `usage` chunk arrives:
 
 ```
-Cache miss after 3m idle: 182k tokens re-billed (~¥0.20) · 0.8k cached · ttft 2.1s ↑ · 轮 (~¥0.31) · 会话 (~¥2.90)
+Cache miss after 3m idle: 182k tokens re-billed (~$0.027) · 0.8k cached · ttft 2.1s ↑ · 轮 (~$0.043) · 会话 (~$0.40)
 ```
 ![cache-miss notice](cache-miss.png)
 
@@ -27,15 +27,16 @@ Cache miss after 3m idle: 182k tokens re-billed (~¥0.20) · 0.8k cached · ttft
 - `re-billed` — the request's uncached input tokens (abbreviated to k).
 - `cached` — the cached-read portion of the same prefill (when the provider
   reports it), so the rebilled-vs-cached split stays unambiguous.
-- `(~¥…)` — the bucket's approximate amount, always bracketed and marked `~`
+- `(~$…)` — the bucket's approximate amount, always bracketed and marked `~`
   as an estimate; token counts stay unbracketed.
 - `ttft` — first-token latency, when available; the up arrow hints a rebuild
   prefill usually ran slower.
 - `轮` / `会话` — the Turn and session totals on the same basis, each as one more
   segment (three levels need no table).
 
-Prices come from the [models.dev](https://models.dev/api.json) DeepSeek snapshot,
-converted to approximate RMB at a fixed rate; the snapshot ships with the package
+Prices come from the [models.dev](https://models.dev/api.json) DeepSeek snapshot and
+are shown in its own USD units — no exchange-rate conversion, with `~` marking an
+estimate; the snapshot ships with the package
 instead of being fetched from the browser. Peak/off-peak pricing is a single-vendor
 policy and is deliberately not hard-coded. An unmatched model shows no amount
 rather than a made-up price. Amounts cover the prompt only (uncached input plus
@@ -94,3 +95,6 @@ Restart `dsh web` (or hard-refresh the running GUI) to load the client bundle.
 - Providers that have never reported cache fields get one grey notice per
   provider and no heuristic guess: TTFT is too sensitive to network/load to
   reliably separate "slow because of a cache miss" from "just slow".
+
+
+
