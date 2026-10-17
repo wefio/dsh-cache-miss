@@ -1,7 +1,7 @@
 {
   "name": "dsh-cache-miss",
   "version": "0.2.0",
-  "description": "DSH web plugin: one yellow line per prompt-cache miss — idle gap, re-billed tokens, approximate RMB cost from the models.dev price list, and TTFT, placed beside the Turn that paid for it.",
+  "description": "DSH web plugin: one yellow line per prompt-cache miss — idle gap, re-billed tokens, what changed in the prompt prefix, approximate USD cost from the models.dev price list, and TTFT, placed beside the Turn that paid for it.",
   "type": "module",
   "private": false,
   "publishConfig": {
@@ -91,17 +91,6 @@
     "url": "https://github.com/wefio/dsh-cache-miss/issues"
   },
   "homepage": "https://github.com/wefio/dsh-cache-miss#readme",
-  "keywords": [
-    "dsh",
-    "dsh-plugin",
-    "deepseek-harness",
-    "prompt-cache",
-    "cache-hit",
-    "billing",
-    "cost"
-  ],
+  "keywords": "dsh,dsh-plugin,deepseek-harness,prompt-cache,cache-hit,billing,cost",
   "license": "MIT"
 }
-
-
-
