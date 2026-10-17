@@ -55,15 +55,19 @@ cache 字段,插件无法区分「完全 miss」与「命中但不报明细」,�
 轮首第一条 assistant 回复正下方,渲染一条黄色等宽单行,形如:
 
 ```
-Cache miss after 3m idle: 182k tokens re-billed (~$0.027) · 0.8k cached · ttft 2.1s ↑ · 轮 (~$0.043) · 会话 (~$0.40)
+Cache miss after 3m idle · 182k tokens re-billed (turn ~$0.031 · step ~$0.027) · 0.8k cached · ttft 2.1s ↑ · (~+agent_team · ~-dsh_job) · session (~$2.90)
 ```
 
 - `idle`:距上一轮结束的空闲时长,>= 60s 显示为分钟,否则为秒。
 - `re-billed`:该请求 `inputTokens`(未命中部分)的千分位缩写(k)。
+- `(turn … · step …)`:本步与整轮的近似金额,共用一组括号、直接用官方术语 `turn` / `step`;
+  只算 **prompt 部分**(未命中输入 + 命中的缓存读),不含 output——本插件关心的是缓存成本,
+  三个层级同口径才可比。金额以 `~` 明示估算,`$` 即 models.dev 的美元单价。
 - `cached`:该请求 `cacheReadTokens`(命中部分)的千分位缩写(k),provider 未回报时不显示。
-- `(~$…)`:该 token 桶的近似金额,永远放在括号里、以 `~` 明示是估算;token 数本身不加括号。
-  金额只算 **prompt 部分**(未命中输入 + 命中的缓存读),不含 output——本插件关心的是缓存成本,
-  三个层级的金额采用同一口径才可比。
+- `(~+tool · ~-tool · ~±tool)`:本次请求的**工具清单变更**——`+` 新增、`-` 移除、`±` 同名但
+  description/parameters 变了。工具目录是 prompt 前缀的一部分,变一个就从变化点往后全部失效,
+  所以这是 miss 最常见的原因。超过 3 个名字折叠成 `~+N more`。
+- `session (~$…)`:会话级近似金额(已载入窗口口径)。
 - `ttft`:该条 assistant 首 token 时延(TTFT)= 首个 token 事件时间 - `step/start`
   事件时间,秒、一位小数,末尾加向上箭头示意重建 prefill 通常更慢;边界缺失时不显示该段。
   流式方言下取首个非空 delta 的事件时间;结算方言下取 `assistant/message.stream` 中
@@ -73,9 +77,9 @@ Cache miss after 3m idle: 182k tokens re-billed (~$0.027) · 0.8k cached · ttft
   重试、压缩等)时,后面的 step 同样会判为 miss。它们也各出一条,文案为
   `Cache miss at step N: …`:轮级 `idle`(距上一轮结束)对轮中事件没有意义,改用 step 号
   定位。同一轮的多条提示按 step 升序紧贴该轮的过程摘要行排列。
-- **步/轮/会话三级就是三段**:不再做表格。步级金额跟在它自己的 token 桶后面;
-  `轮` 与 `会话` 各追加一段,取自已载入的 assistant 记录(`legacy.nodes`)按当前模型单价
-  求和——所以它是"已载入窗口"的口径,不是逐笔账单。
+- **step / turn / session 三级就是段**:不做表格。step 与 turn 的金额共用 re-billed 后面的
+  一组括号,session 追加为末尾一段;turn / session 取自已载入的 assistant 记录
+  (`legacy.nodes`)按当前模型单价求和——"已载入窗口"口径,不是逐笔账单。
 - 纯文本,无 emoji,不自动消失,刷新页面后随会话投影自然消失。
 
 当 provider 回 usage 但不回 `cacheReadTokens`/`cacheWriteTokens`,且从未出现过任何
@@ -85,6 +89,25 @@ cache 字段时,插件无法区分「完全 miss」与「命中但不报明细�
 provider 一次的更详细 warning(含 turn/step、provider、`inputTokens` 与缺失字段说明)。
 一旦该 provider 出现过任一 cache 字段,后续无字段的请求按完全 miss 正常显示黄线。
 不做 TTFT 启发式兜底:用户间隔可能远超 TTFT 阈值,无法可靠区分 cache miss 与网络/负载慢。
+
+## 前缀变更检测
+
+DeepSeek 按前缀命中缓存:系统提示或**工具目录**任一处变了,变化点之后的 token 全部按 miss 计费。
+0.2 起的核心把这件事算好了但只存在于"轨迹"视图:每个请求的 `request/header` 事件会被
+`uiConversation.inspectRequestPrompt(previous, event, system)` 规范化成一个快照
+`{ config, system, tools }`,并给出 `change.kind`(`system` / `tools` / `system-and-tools`)。
+
+插件因此注册第二个 Definition(`kind: cache-miss-prefix`,`target: chat`,不发布节点):
+
+- `match`:只认 `request/header`,以事件 `seq` 作 id;
+- `start`:用 `reader.previous('cache-miss-prefix')` 取上一个请求的快照,调用上面的 inspector,
+  再把 `previous.tools` 与当前 `prompt.tools` 按 name + description/parameters 做差;
+- 结果写进模块级 map(键 `turn:step`,从 `match.location` 推出,上限 500 条),渲染层按自己的
+  `turn`/`step` 取用,拼成 `(~+tool · ~-tool · ~±tool)` 段。
+
+已知边界:这是**客户端** diff,map 以 `turn:step` 为键,同页打开两个**不同会话**且轮号撞车时
+原因段可能张冠李戴(极低概率,只影响这段文字);`inspectRequestPrompt` 不存在的旧核心上自动
+不注册,行里也就没有这一段——其余功能不受影响。
 
 ## 计价口径
 
@@ -220,5 +243,7 @@ idle 时长按快照形状取:先读 chat 快照的 `turnTimings`(顶层),没有
 - 不使用 emoji。
 - 不修改 DSH 源码、不逆向侵入 `turnTail` 链。
 - 类型仅来自官方 npm SDK。测试使用 vitest。
+
+
 
 

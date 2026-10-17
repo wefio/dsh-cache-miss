@@ -5,6 +5,7 @@
  */
 
 import { CURRENCY, formatCost } from './prices'
+import { formatToolChange, type ToolChange } from './prefix'
 
 /** The token-accounting subset this plugin reads, aligned with the official
  * `TokenUsage` contract (@deepseek-ai/dsh-llm). Counts are DISJOINT;
@@ -72,10 +73,8 @@ export function isCacheMiss(usage: CacheUsage | undefined, hasCacheEvidence = tr
 
 /** Approximate prefill cost attached to one line, in USD (models.dev list prices). */
 export interface LineCost {
-  /** Cost of the uncached (re-billed) input of this step. */
-  rebilled: number
-  /** Cost of the cache-hit input of this step, or undefined when unreported. */
-  cached: number | undefined
+  /** Prompt cost of this Step (uncached input plus cache reads). */
+  step: number
   /** Prompt cost of the whole Turn, over the loaded window. */
   turn?: number
   /** Prompt cost of the session, over the loaded window. */
@@ -95,6 +94,8 @@ export interface LineFacts {
   step?: number
   /** Approximate amounts; omitted when the model has no list price. */
   cost?: LineCost
+  /** Tool-catalog change that rewrote the prompt prefix for this step, when known. */
+  toolChange?: ToolChange
 }
 
 function formatIdle(ms: number): string {
@@ -180,12 +181,9 @@ export function formatLocalTime(epochMs: number): string {
   return new Date(epochMs).toLocaleString()
 }
 
-/** One approximate amount as a bracketed suffix: empty when unknown, and empty
- * when it would round to a 0.000 display — that is noise, not information. */
-function amount(usd: number | undefined): string {
-  if (usd === undefined) return ''
-  const formatted = formatCost(usd)
-  return formatted === '0.000' ? '' : ` (~${CURRENCY}${formatted})`
+/** One approximate amount with the estimate marker, without brackets. */
+function amountText(usd: number): string {
+  return `~${CURRENCY}${formatCost(usd)}`
 }
 
 /**
@@ -196,28 +194,35 @@ function amount(usd: number | undefined): string {
  * missed because something invalidated the cache mid-Turn, so it is reported by
  * step instead: the Turn-level gap says nothing about that step.
  *
- * Amounts are approximate USD derived from the models.dev list price, so they
- * ride in brackets behind the token counts they price; levels stack as further
- * segments (`轮` / `会话`), never as a table.
+ * Amounts are approximate USD from the models.dev list price. The step and turn
+ * amounts share one bracket behind the token count they price (the official
+ * `step` / `turn` words), the session amount is a trailing segment, and a tool
+ * catalog change — the usual cause of a prefix invalidation — is its own segment.
  *
  * @param facts - idle, re-billed (uncached) token count, optional cached-read
- *   count, TTFT (ms; 0 = absent), the step inside the Turn, and optional cost.
+ *   count, TTFT (ms; 0 = absent), the step inside the Turn, optional cost, and an
+ *   optional tool-catalog change.
  * @returns the single-line message, without leading/trailing punctuation.
  */
 export function formatLine(facts: LineFacts): string {
-  const rebilled = formatTokens(facts.rebilledTokens)
   const cost = facts.cost
   const step = facts.step ?? 1
-  const body = step > 1
-    ? `Cache miss at step ${step}: ${rebilled} tokens re-billed${amount(cost?.rebilled)}`
-    : `Cache miss after ${formatIdle(facts.idleMs)} idle: ${rebilled} tokens re-billed${amount(cost?.rebilled)}`
+  const head = step > 1 ? `Cache miss at step ${step}` : `Cache miss after ${formatIdle(facts.idleMs)} idle`
+  const rebilled = `${formatTokens(facts.rebilledTokens)} tokens re-billed`
+  const amounts: string[] = []
+  if (cost !== undefined) {
+    if (cost.turn !== undefined) amounts.push(`turn ${amountText(cost.turn)}`)
+    amounts.push(`step ${amountText(cost.step)}`)
+  }
+  const body = amounts.length > 0 ? `${head} · ${rebilled} (${amounts.join(' · ')})` : `${head} · ${rebilled}`
   const tail: string[] = []
   if (typeof facts.cacheReadTokens === 'number' && facts.cacheReadTokens >= 0) {
-    tail.push(`${formatCached(facts.cacheReadTokens)} cached${amount(cost?.cached)}`)
+    tail.push(`${formatCached(facts.cacheReadTokens)} cached`)
   }
   if ((facts.ttftMs ?? 0) > 0) tail.push(`ttft ${formatTtft(facts.ttftMs)} ↑`)
-  if (cost?.turn !== undefined) tail.push(`轮${amount(cost.turn)}`)
-  if (cost?.session !== undefined) tail.push(`会话${amount(cost.session)}`)
+  const tools = facts.toolChange === undefined ? undefined : formatToolChange(facts.toolChange)
+  if (tools !== undefined) tail.push(tools)
+  if (cost?.session !== undefined) tail.push(`session (${amountText(cost.session)})`)
   return tail.length > 0 ? `${body} · ${tail.join(' · ')}` : body
 }
 
@@ -396,6 +401,8 @@ export interface LineInput {
   step?: number
   /** Approximate amounts; omitted when the model has no list price. */
   cost?: LineCost
+  /** Tool-catalog change that rewrote the prompt prefix for this step, when known. */
+  toolChange?: ToolChange
   /** True when any prior turn exists (turn > 1; turn numbers are global and
    * monotonic, so window cropping or a missing turn/end must not turn a real
    * miss into a cold start). False means the first turn of a fresh cache,
@@ -445,8 +452,12 @@ export function getLineStatus(input: LineInput): LineStatus {
       ttftMs: input.ttftMs,
       ...(input.step === undefined ? {} : { step: input.step }),
       ...(input.cost === undefined ? {} : { cost: input.cost }),
+      ...(input.toolChange === undefined ? {} : { toolChange: input.toolChange }),
     }),
   }
 }
+
+
+
 
 

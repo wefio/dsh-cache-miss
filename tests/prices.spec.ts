@@ -85,35 +85,52 @@ describe('formatCost', () => {
 })
 
 describe('formatLine with amounts', () => {
-  it('brackets each amount behind the token count it prices', () => {
+  it('brackets the step amount behind the token count it prices', () => {
     const line = formatLine({
       idleMs: 3 * 60_000,
       rebilledTokens: 182_000,
       cacheReadTokens: 800,
       ttftMs: 2_100,
-      cost: { rebilled: 0.0273, cached: 0.0000024 },
+      cost: { step: 0.0273 },
     })
     expect(line).toBe(
-      'Cache miss after 3m idle: 182k tokens re-billed (~$0.027) · 1k cached · ttft 2.1s ↑',
+      'Cache miss after 3m idle · 182k tokens re-billed (step ~$0.027) · 1k cached · ttft 2.1s ↑',
     )
   })
 
-  it('appends the Turn and session levels as further segments', () => {
+  it('shares one bracket between the turn and step amounts and keeps session last', () => {
     const line = formatLine({
       idleMs: 60_000,
       rebilledTokens: 1000,
       cacheReadTokens: undefined,
       ttftMs: 0,
-      cost: { rebilled: 0.0012, cached: undefined, turn: 0.0135, session: 1.44 },
+      cost: { step: 0.0012, turn: 0.0135, session: 1.44 },
     })
-    expect(line).toBe('Cache miss after 1m idle: 1k tokens re-billed (~$0.001) · 轮 (~$0.013) · 会话 (~$1.44)')
+    expect(line).toBe(
+      'Cache miss after 1m idle · 1k tokens re-billed (turn ~$0.013 · step ~$0.001) · session (~$1.44)',
+    )
   })
 
   it('shows no amounts at all when the model has no list price', () => {
     const line = formatLine({ idleMs: 0, rebilledTokens: 22_000, cacheReadTokens: 0, ttftMs: 1_200 })
-    expect(line).toBe('Cache miss after 0s idle: 22k tokens re-billed · 0k cached · ttft 1.2s ↑')
+    expect(line).toBe('Cache miss after 0s idle · 22k tokens re-billed · 0k cached · ttft 1.2s ↑')
+  })
+
+  it('reports the tool catalog change before the session amount', () => {
+    const line = formatLine({
+      idleMs: 60_000,
+      rebilledTokens: 22_000,
+      cacheReadTokens: 0,
+      ttftMs: 8_100,
+      toolChange: { added: ['agent_team'], removed: ['dsh_job'], changed: [] },
+      cost: { step: 0.003, turn: 0.003, session: 2.9 },
+    })
+    expect(line).toBe(
+      'Cache miss after 1m idle · 22k tokens re-billed (turn ~$0.003 · step ~$0.003) · 0k cached · ttft 8.1s ↑ · (~+agent_team · ~-dsh_job) · session (~$2.90)',
+    )
   })
 })
+
 
 
 

@@ -111,44 +111,44 @@ describe('formatDebugLine', () => {
 describe('formatLine', () => {
   it('formats the canonical line', () => {
     const line = formatLine({ idleMs: 3 * 60_000, rebilledTokens: 182_000, cacheReadTokens: undefined, ttftMs: 2_100 })
-    expect(line).toBe('Cache miss after 3m idle: 182k tokens re-billed · ttft 2.1s ↑')
+    expect(line).toBe('Cache miss after 3m idle · 182k tokens re-billed · ttft 2.1s ↑')
   })
 
   it('shows seconds below one minute', () => {
     expect(formatLine({ idleMs: 45_000, rebilledTokens: 20_000, cacheReadTokens: undefined, ttftMs: 900 }))
-      .toBe('Cache miss after 45s idle: 20k tokens re-billed · ttft 0.9s ↑')
+      .toBe('Cache miss after 45s idle · 20k tokens re-billed · ttft 0.9s ↑')
   })
 
   it('rounds minutes upward when >= 60s', () => {
     expect(formatLine({ idleMs: 60_000, rebilledTokens: 100_000, cacheReadTokens: undefined, ttftMs: 500 }))
-      .toBe('Cache miss after 1m idle: 100k tokens re-billed · ttft 0.5s ↑')
+      .toBe('Cache miss after 1m idle · 100k tokens re-billed · ttft 0.5s ↑')
   })
 
   it('omits ttft arrow when ttft is absent', () => {
     expect(formatLine({ idleMs: 0, rebilledTokens: 1000, cacheReadTokens: undefined, ttftMs: 0 }))
-      .toBe('Cache miss after 0s idle: 1k tokens re-billed')
+      .toBe('Cache miss after 0s idle · 1k tokens re-billed')
   })
 
   it('appends the cached-read portion when reported', () => {
     expect(formatLine({ idleMs: 0, rebilledTokens: 180_655, cacheReadTokens: 768, ttftMs: 0 }))
-      .toBe('Cache miss after 0s idle: 181k tokens re-billed · 1k cached')
+      .toBe('Cache miss after 0s idle · 181k tokens re-billed · 1k cached')
   })
 
   it('formats small token counts without decimal drift', () => {
     expect(formatLine({ idleMs: 0, rebilledTokens: 999, cacheReadTokens: undefined, ttftMs: 0 }))
-      .toBe('Cache miss after 0s idle: 1k tokens re-billed')
+      .toBe('Cache miss after 0s idle · 1k tokens re-billed')
   })
 
   it('reports a mid-Turn miss by step instead of the Turn-level idle gap', () => {
     // Something invalidated the cache at step 17 of this Turn; the gap since the
     // previous Turn ended says nothing about that step, so the line names the step.
     expect(formatLine({ idleMs: 17 * 24 * 3_600_000, rebilledTokens: 25_639, cacheReadTokens: 51_712, ttftMs: 1_600, step: 17 }))
-      .toBe('Cache miss at step 17: 26k tokens re-billed · 52k cached · ttft 1.6s ↑')
+      .toBe('Cache miss at step 17 · 26k tokens re-billed · 52k cached · ttft 1.6s ↑')
   })
 
   it('keeps the canonical line for the Turn\'s first request', () => {
     expect(formatLine({ idleMs: 3 * 60_000, rebilledTokens: 22_000, cacheReadTokens: 0, ttftMs: 1_200, step: 1 }))
-      .toBe('Cache miss after 3m idle: 22k tokens re-billed · 0k cached · ttft 1.2s ↑')
+      .toBe('Cache miss after 3m idle · 22k tokens re-billed · 0k cached · ttft 1.2s ↑')
   })
 })
 
@@ -156,13 +156,13 @@ describe('getLineStatus', () => {
   it('returns a line status for a miss', () => {
     const s = getLineStatus({ usage: { inputTokens: 10_000, cacheReadTokens: 0 }, idleMs: 90_000, ttftMs: 1200, hasPriorTurn: true, hasCacheEvidence: true })
     expect(s.kind).toBe('show')
-    expect(s.line).toBe('Cache miss after 1m idle: 10k tokens re-billed · 0k cached · ttft 1.2s ↑')
+    expect(s.line).toBe('Cache miss after 1m idle · 10k tokens re-billed · 0k cached · ttft 1.2s ↑')
   })
 
   it('labels a mid-Turn step with its step number', () => {
     const s = getLineStatus({ usage: { inputTokens: 25_639, cacheReadTokens: 51_712 }, idleMs: 90_000, ttftMs: 1600, step: 17, hasPriorTurn: true, hasCacheEvidence: true })
     expect(s.kind).toBe('show')
-    expect(s.line).toBe('Cache miss at step 17: 26k tokens re-billed · 52k cached · ttft 1.6s ↑')
+    expect(s.line).toBe('Cache miss at step 17 · 26k tokens re-billed · 52k cached · ttft 1.6s ↑')
   })
 
   it('returns an unconfirmed status when usage lacks cache fields and the provider has no evidence', () => {
@@ -179,7 +179,7 @@ describe('getLineStatus', () => {
   it('returns a miss when usage lacks cache fields but the provider has proven cache accounting', () => {
     const s = getLineStatus({ usage: { inputTokens: 10_000 }, idleMs: 0, ttftMs: 0, hasPriorTurn: true, hasCacheEvidence: true })
     expect(s.kind).toBe('show')
-    expect(s.line).toBe('Cache miss after 0s idle: 10k tokens re-billed')
+    expect(s.line).toBe('Cache miss after 0s idle · 10k tokens re-billed')
   })
 
   it('returns hidden for a hit', () => {
@@ -201,7 +201,7 @@ describe('getLineStatus', () => {
       hasCacheEvidence: true,
     })
     expect(s.kind).toBe('show')
-    expect(s.line).toBe('Cache miss after 0s idle: 10k tokens re-billed · 0k cached')
+    expect(s.line).toBe('Cache miss after 0s idle · 10k tokens re-billed · 0k cached')
   })
 
   it('shows the cached-read portion beside the re-billed total', () => {
@@ -213,7 +213,7 @@ describe('getLineStatus', () => {
       hasCacheEvidence: true,
     })
     expect(s.kind).toBe('show')
-    expect(s.line).toBe('Cache miss after 1m idle: 181k tokens re-billed · 1k cached')
+    expect(s.line).toBe('Cache miss after 1m idle · 181k tokens re-billed · 1k cached')
   })
 
   it('returns hidden for a cold-start first turn (no prior turn)', () => {
@@ -324,3 +324,4 @@ describe('isDebugEnabled', () => {
     expect(isDebugEnabled({ getItem: () => { throw new Error('blocked') } })).toBe(false)
   })
 })
+

@@ -10,7 +10,8 @@ import {
   type LineCost,
   type LineStatus,
 } from './logic'
-import { loadedPrefillTotals, prefillCost, resolveModelPrice } from './prices'
+import { loadedPrefillTotals, prefillCost, resolveModelPrice, totalOf } from './prices'
+import { createPrefixDefinition, readToolChange, type PromptInspector } from './prefix-node'
 
 /** Yellow cache-miss single line rendered under the turn's first assistant. */
 const LINE_STYLE = {
@@ -334,16 +335,19 @@ function CacheMissLine(props: CacheMissLineProps): React.ReactElement | null {
   const stepCost = price === undefined || data?.usage === undefined ? undefined : prefillCost(price, data.usage)
   const totals = price === undefined ? undefined : loadedPrefillTotals(loadedNodes, price, data?.turn)
   const cost: LineCost | undefined = stepCost === undefined ? undefined : {
-    rebilled: stepCost.rebilled,
-    cached: stepCost.cached,
+    step: totalOf(stepCost),
     ...(totals === undefined ? {} : { turn: totals.turn, session: totals.session }),
   }
+  // What the request changed in the prompt prefix (the usual cause of a miss);
+  // recorded by the request-header Definition and handed over by `turn:step`.
+  const toolChange = data === undefined ? undefined : readToolChange(data.turn, data.step)
   const decided: LineStatus = data === undefined ? { kind: 'hidden' } : getLineStatus({
     usage: data.usage,
     idleMs: timing.idleMs,
     ttftMs: stepTtft,
     step: data.step,
     ...(cost === undefined ? {} : { cost }),
+    ...(toolChange === undefined ? {} : { toolChange }),
     hasPriorTurn: timing.hasPriorTurn,
     hasCacheEvidence,
   })
@@ -446,9 +450,11 @@ function CacheMissLine(props: CacheMissLineProps): React.ReactElement | null {
  */
 export const inject = ['slots']
 
-/** The register-capable Definition registry surface the cache-miss Definition needs. */
+/** The service surface the notices need: a Definition registry plus, on cores
+ * from 0.2, the canonical request-prompt interpretation. */
 interface CacheMissRegistry {
   register(definition: unknown): () => void
+  inspectRequestPrompt?: PromptInspector
 }
 
 /** Structural registry read across the two core service names. */
@@ -465,12 +471,25 @@ function registerCacheMissDefinition(
   }
   const asRegistry = (value: unknown): CacheMissRegistry | undefined => {
     if (value === null || typeof value !== 'object') return undefined
-    const node = value as { register?: (definition: unknown) => () => void; events?: unknown }
-    if (typeof node.register === 'function') return node as CacheMissRegistry
+    const node = value as {
+      register?: (definition: unknown) => () => void
+      events?: unknown
+      inspectRequestPrompt?: unknown
+    }
+    const inspect = typeof node.inspectRequestPrompt === 'function'
+      ? (node.inspectRequestPrompt as PromptInspector)
+      : undefined
+    const withInspect = (registry: CacheMissRegistry): CacheMissRegistry =>
+      inspect === undefined ? registry : { register: registry.register, inspectRequestPrompt: inspect }
+    if (typeof node.register === 'function') {
+      return withInspect({ register: node.register.bind(node) })
+    }
     const events = node.events
     if (events !== null && typeof events === 'object') {
       const eventsNode = events as { register?: (definition: unknown) => () => void }
-      if (typeof eventsNode.register === 'function') return eventsNode as CacheMissRegistry
+      if (typeof eventsNode.register === 'function') {
+        return withInspect({ register: eventsNode.register.bind(eventsNode) })
+      }
     }
     return undefined
   }
@@ -489,7 +508,7 @@ function registerCacheMissDefinition(
 /** Build marker written to `<html>` while debug mode is on, so a page can prove
  * which bundle it is running: the client bundle loads only on page load, and a
  * stale one otherwise looks identical to the current one. */
-const DEBUG_BUILD_TAG = 'release-1.9'
+const DEBUG_BUILD_TAG = 'release-0.2'
 
 /** Register the cache-miss Definition (best-effort) and its keyed chat-node renderer. */
 export function apply(ctx: Context): void {
@@ -514,6 +533,17 @@ export function apply(ctx: Context): void {
         } catch (error) {
           console.warn('[dsh-cache-miss] failed to register the cache-miss node; cache-miss lines are disabled.', error)
         }
+        // Prefix-change tracking needs the core's canonical prompt interpretation;
+        // without it the notice line simply carries no tool segment.
+        const inspect = registry.inspectRequestPrompt
+        if (inspect !== undefined) {
+          try {
+            const dispose = registry.register(createPrefixDefinition(inspect.bind(registry)))
+            ctx.effect(() => dispose)
+          } catch (error) {
+            console.warn('[dsh-cache-miss] failed to register the request-prefix tracker; tool changes stay unreported.', error)
+          }
+        }
       })
     }
     return ctx.slots.register({
@@ -522,6 +552,9 @@ export function apply(ctx: Context): void {
     }, CacheMissLine)
   })
 }
+
+
+
 
 
 
