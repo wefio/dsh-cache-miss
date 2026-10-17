@@ -1,6 +1,6 @@
 import { createElement, useEffect, useRef, useState } from 'react'
-import type {} from '@deepseek-ai/dsh-client-runtime/client'
-import type {} from '@deepseek-ai/dsh-client-ui-slots'
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
+import type {} from '@deepseek-ai/dsh-client-ui-chat/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type { Context } from '@deepseek-ai/cordis'
 import { cacheMissDefinition, type CacheMissNodeData } from './cache-miss-node'

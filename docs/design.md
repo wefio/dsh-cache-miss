@@ -167,8 +167,15 @@ localStorage.removeItem('dsh-cache-miss:debug'); location.reload()
 
 客户端入口声明:核心 `0.1.5` 起宿主内置的是 `@deepseek-ai/dsh-client-modules`
 (`dsh-client-runtime` 在 npm 上止于 `0.1.1-rc.2`,已不再随宿主发布),因此
-`dsh.client.inject` 与 peer 都指向 `dsh-client-modules`;类型仍取自官方
-`@deepseek-ai/*` npm SDK 的 devDependencies。
+`dsh.client.inject` 与 peer 都指向 `dsh-client-modules`。
+
+类型取自官方 `@deepseek-ai/*` 0.2.1 系列 SDK(devDependencies):Definition 契约来自
+`dsh-client-ui-conversation`,`ChatConversationViewNode` / `ChatNodeDataMap` / 座位
+props 来自 `dsh-client-ui-chat`,`ctx.slots` 来自 `dsh-client-ui-renderer`。0.1 时代的
+`dsh-client-runtime` devDependency 已移除——它只提供类型、早已不随宿主发布,且会把
+`dsh-client-connection@0.0.1-rc.x`(GHSA-8m2g-8cgm-3vcp,本地控制面认证绕过)拖进
+lockfile。0.2 收窄了事件联合类型,不再包含本项目仍支持的 `assistant/chunk` 流式方言,
+因此该方言在 `asStreamEvent` 一处按结构读取,而不是让类型去限制它。
 
 idle 时长按快照形状取:先读 chat 快照的 `turnTimings`(顶层),没有再读它的
 `legacy.turnTimings`,仍未命中再退回 session 快照(0.2 之前的核心把 timings 放在这里);
