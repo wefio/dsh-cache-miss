@@ -63,15 +63,16 @@ describe('shouldAttempt', () => {
   })
 
   it('does not hammer the endpoint for one unpriceable model', () => {
-    const now = 10 * 60 * 1000
+    const now = 10 * 60 * 60 * 1000
     expect(shouldAttempt(now - 1000, now)).toBe(false)
-    expect(shouldAttempt(now - 59 * 60 * 1000, now)).toBe(false)
+    expect(shouldAttempt(now - 4 * 60 * 60 * 1000, now)).toBe(false)
   })
 
-  it('allows another attempt an hour later', () => {
+  it('allows another attempt five hours later', () => {
     const now = 10 * 60 * 60 * 1000
-    expect(shouldAttempt(now - 61 * 60 * 1000, now)).toBe(true)
+    expect(shouldAttempt(now - 6 * 60 * 60 * 1000, now)).toBe(true)
   })
 })
+
 
 

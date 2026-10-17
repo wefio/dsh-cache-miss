@@ -17,7 +17,7 @@ const PROVIDER = 'deepseek'
 const STORAGE_KEY = 'dsh-cache-miss:prices'
 const RECORD_VERSION = 1
 /** Minimum gap between two refresh attempts for the same page session. */
-const MIN_ATTEMPT_INTERVAL_MS = 60 * 60 * 1000
+const MIN_ATTEMPT_INTERVAL_MS = 5 * 60 * 60 * 1000
 /** How long a stored catalog stays trusted before the page tries to refresh it. */
 const STORED_TTL_MS = 24 * 60 * 60 * 1000
 
@@ -242,3 +242,4 @@ export function requestPriceRefresh(now = Date.now()): boolean {
   })()
   return true
 }
+
