@@ -9,13 +9,14 @@
 
 一轮 Agent 对话会反复执行 `assistant -> tool -> assistant -> tool ...`。
 该轮**第一次**模型调用正是供应商提示缓存可能已过期、需要整段重新 prefill(重建缓存)的时机;
-后续同轮调用往往命中刚重建的缓存。因此"缓存未命中"发生在轮首,而不是轮尾。
+后续同轮调用通常命中刚重建的缓存,但并非总是如此——上下文在轮内被改写时(工具结果、重试、
+压缩等),后面的调用同样可能整段失效。因此轮首是主要落点,轮中命中失效的 step 也要能看到。
 
 DSH 自带的 token/缓存统计条位于输入框下方,轮次繁多时难以对应到具体某轮;
-消息最底部的"产物文件"行则是轮尾才出现。二者都无法在轮首就地提示一次 miss。
+消息最底部的"产物文件"行则是轮尾才出现。二者都无法在 miss 发生的位置就地提示。
 
-本插件把 miss 提示放到它真正发生的时刻:轮首第一条 assistant 回复正下方,黄色单行,
-不顶替任何已有 UI。它只关心"该轮第一次模型请求是否重建了缓存",不关心后续命中的调用。
+本插件把 miss 提示放到它真正发生的时刻:该 step 的 assistant 内容上方,黄色单行,
+不顶替任何已有 UI。轮首那条带"距上轮结束的空闲时长",轮中那条带 step 号。
 
 ## 判定口径
 
@@ -65,6 +66,10 @@ Cache miss after 3m idle: 182k tokens re-billed · 0.8k cached · ttft 2.1s ↑
   流式方言下取首个非空 delta 的事件时间;结算方言下取 `assistant/message.stream` 中
   最早一条带 token 的记录(`reasoning-chunks` / `text-chunks` / `tool-call-chunks` 的
   `time0`;结构性的 `chunk` 块标记不含 token,不算边界)。
+- **轮中后续 step 的 miss**:轮首不是唯一可能失效的位置——上下文在轮内被改写(工具结果、
+  重试、压缩等)时,后面的 step 同样会判为 miss。它们也各出一条,文案为
+  `Cache miss at step N: …`:轮级 `idle`(距上一轮结束)对轮中事件没有意义,改用 step 号
+  定位。同一轮的多条提示按 step 升序紧贴该轮的过程摘要行排列。
 - 纯文本,无 emoji,不自动消失,刷新页面后随会话投影自然消失。
 
 当 provider 回 usage 但不回 `cacheReadTokens`/`cacheWriteTokens`,且从未出现过任何

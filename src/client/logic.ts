@@ -76,6 +76,9 @@ export interface LineFacts {
   /** Cached-read portion of the same prefill, or undefined when the provider reported none. */
   cacheReadTokens: number | undefined
   ttftMs: number
+  /** Step inside the Turn. Anything past the Turn's first request is a mid-Turn
+   * cache invalidation, whose relevant fact is which step it happened at. */
+  step?: number
 }
 
 function formatIdle(ms: number): string {
@@ -163,14 +166,22 @@ export function formatLocalTime(epochMs: number): string {
 
 /**
  * Render one cache-miss line.
+ *
+ * The Turn's first request is reported with the idle gap since the previous Turn
+ * — that gap is what usually expired the cache. A later step of the same Turn
+ * missed because something invalidated the cache mid-Turn, so it is reported by
+ * step instead: the Turn-level gap says nothing about that step.
+ *
  * @param facts - idle, re-billed (uncached) token count, optional cached-read
- *   count, and TTFT (ms; 0 = absent).
+ *   count, TTFT (ms; 0 = absent), and the step inside the Turn.
  * @returns the single-line message, without leading/trailing punctuation.
  */
 export function formatLine(facts: LineFacts): string {
-  const idle = formatIdle(facts.idleMs)
   const rebilled = formatTokens(facts.rebilledTokens)
-  const body = `Cache miss after ${idle} idle: ${rebilled} tokens re-billed`
+  const step = facts.step ?? 1
+  const body = step > 1
+    ? `Cache miss at step ${step}: ${rebilled} tokens re-billed`
+    : `Cache miss after ${formatIdle(facts.idleMs)} idle: ${rebilled} tokens re-billed`
   const tail: string[] = []
   if (typeof facts.cacheReadTokens === 'number' && facts.cacheReadTokens >= 0) {
     tail.push(`${formatCached(facts.cacheReadTokens)} cached`)
@@ -350,6 +361,8 @@ export interface LineInput {
   usage: CacheUsage | undefined
   idleMs: number
   ttftMs: number
+  /** Step inside the Turn; past 1 means the cache was invalidated mid-Turn. */
+  step?: number
   /** True when any prior turn exists (turn > 1; turn numbers are global and
    * monotonic, so window cropping or a missing turn/end must not turn a real
    * miss into a cold start). False means the first turn of a fresh cache,
@@ -397,6 +410,7 @@ export function getLineStatus(input: LineInput): LineStatus {
       rebilledTokens: usage.inputTokens,
       cacheReadTokens: usage.cacheReadTokens,
       ttftMs: input.ttftMs,
+      ...(input.step === undefined ? {} : { step: input.step }),
     }),
   }
 }

@@ -150,7 +150,38 @@ function anchorLineBesideTurnProcess(
     anchor.insertAdjacentElement('afterend', host)
   }
   if (host.textContent !== line) host.textContent = line
+  orderAnchoredLines(anchor, turn)
   return { anchored: true, host }
+}
+
+/**
+ * Keep one Turn's anchored lines in step order.
+ *
+ * More than one step of a Turn can miss (something invalidated the cache
+ * mid-Turn), and every one of those lines anchors under the same process summary
+ * row. React re-inserts them as their nodes remount, so without this a later
+ * step's line can end up above an earlier step's; sorting by the step recorded in
+ * `data-dsh-cache-miss` keeps the row reading in the order the misses happened.
+ *
+ * @param anchor - the Turn's process summary row these lines follow.
+ * @param turn - Turn whose lines to order; other Turns' lines are untouched.
+ */
+function orderAnchoredLines(anchor: Element, turn: number): void {
+  const parent = anchor.parentElement
+  if (parent === null) return
+  const prefix = `${turn}:`
+  const lines = [...parent.querySelectorAll(`[${ANCHORED_LINE_ATTR}]`)]
+    .filter((node) => node.getAttribute(ANCHORED_LINE_ATTR)?.startsWith(prefix) === true)
+    .sort((left, right) => {
+      const stepOf = (node: Element): number => Number(node.getAttribute(ANCHORED_LINE_ATTR)?.slice(prefix.length) ?? 0)
+      return stepOf(left) - stepOf(right)
+    })
+  if (lines.length < 2) return
+  let cursor: Element = anchor
+  for (const line of lines) {
+    if (line.previousElementSibling !== cursor) parent.insertBefore(line, cursor.nextElementSibling)
+    cursor = line
+  }
 }
 
 /**
@@ -298,6 +329,7 @@ function CacheMissLine(props: CacheMissLineProps): React.ReactElement | null {
     usage: data.usage,
     idleMs: timing.idleMs,
     ttftMs: stepTtft,
+    step: data.step,
     hasPriorTurn: timing.hasPriorTurn,
     hasCacheEvidence,
   })
