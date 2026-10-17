@@ -47,7 +47,7 @@ Cache miss after 3m idle · 182k tokens re-billed (turn ~$0.027) · 0.8k cached 
 
 ### 为什么前缀一变就全贵了
 
-DeepSeek 的前缀缓存要求**从第一个 token 起逐字节一致**。系统提示、工具目录、请求 config（provider / reasoningEffort 等）都属于前缀——任意一处变了，变化点之后的 token 全部按未命中计费。实测里真正的 miss 几乎都来自前缀变更，而不是缓存过期：空闲 27 分钟后下一轮仍然命中。
+DeepSeek 的前缀缓存要求**从第一个 token 起逐字节一致**。系统提示、工具目录、请求 config（provider / reasoningEffort 等）都属于前缀——任意一处变了，变化点之后的 token 全部按未命中计费。实测里真正的 miss 几乎都来自前缀变更，而不是缓存过期——空闲 27 分钟后下一轮仍然命中过（缓存 TTL 比直觉长，具体由服务端决定）。
 
 ### 插件会显示这样几段
 
@@ -101,6 +101,7 @@ dsh plugin --profile web add dsh-cache-miss
 - TTFT 是 step 的 `step/start` 事件到首个非空 token delta 事件的墙钟间隔，取自会话事件时间；当任一边界落在已加载窗口之外时视为缺省（不显示 `· ttft ...` 段）。
 - 节点对每个 assistant step 都会发布，但命中时渲染为空，因此命中轮不产生可见行；每一步至多输出一条控制台日志。
 - 从未出现 cache 字段的 provider 首次出现时显示一次灰色“无法确认”提示，不做启发式猜测——TTFT 受网络/负载影响，无法可靠区分"cache miss 导致慢"与"本来就慢"。
+
 
 
 

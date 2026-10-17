@@ -78,7 +78,7 @@ DeepSeek's prefix cache requires a byte-for-byte match from the very first token
 system prompt, the tool catalog and the request config (provider, reasoningEffort, …)
 all belong to that prefix — change any of them and every token after the change is
 billed as uncached. In practice a real miss almost always comes from a prefix change
-rather than from cache expiry: a Turn after 27 idle minutes still hit.
+rather than from cache expiry — a Turn after 27 idle minutes still hit in practice (the TTL is longer than it feels, and the server decides it).
 
 ### What the line tells you
 
@@ -175,6 +175,7 @@ Restart `dsh web` (or hard-refresh the running GUI) to load the client bundle.
 - Providers that have never reported cache fields get one grey notice per
   provider and no heuristic guess: TTFT is too sensitive to network/load to
   reliably separate "slow because of a cache miss" from "just slow".
+
 
 
 
