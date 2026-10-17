@@ -9,13 +9,14 @@
 
 一轮 Agent 对话会反复执行 `assistant -> tool -> assistant -> tool ...`。
 该轮**第一次**模型调用正是供应商提示缓存可能已过期、需要整段重新 prefill(重建缓存)的时机;
-后续同轮调用往往命中刚重建的缓存。因此"缓存未命中"发生在轮首,而不是轮尾。
+后续同轮调用通常命中刚重建的缓存,但并非总是如此——上下文在轮内被改写时(工具结果、重试、
+压缩等),后面的调用同样可能整段失效。因此轮首是主要落点,轮中命中失效的 step 也要能看到。
 
 DSH 自带的 token/缓存统计条位于输入框下方,轮次繁多时难以对应到具体某轮;
-消息最底部的"产物文件"行则是轮尾才出现。二者都无法在轮首就地提示一次 miss。
+消息最底部的"产物文件"行则是轮尾才出现。二者都无法在 miss 发生的位置就地提示。
 
-本插件把 miss 提示放到它真正发生的时刻:轮首第一条 assistant 回复正下方,黄色单行,
-不顶替任何已有 UI。它只关心"该轮第一次模型请求是否重建了缓存",不关心后续命中的调用。
+本插件把 miss 提示放到它真正发生的时刻:该 step 的 assistant 内容上方,黄色单行,
+不顶替任何已有 UI。轮首那条带"距上轮结束的空闲时长",轮中那条带 step 号。
 
 ## 判定口径
 
@@ -65,6 +66,10 @@ Cache miss after 3m idle: 182k tokens re-billed · 0.8k cached · ttft 2.1s ↑
   流式方言下取首个非空 delta 的事件时间;结算方言下取 `assistant/message.stream` 中
   最早一条带 token 的记录(`reasoning-chunks` / `text-chunks` / `tool-call-chunks` 的
   `time0`;结构性的 `chunk` 块标记不含 token,不算边界)。
+- **轮中后续 step 的 miss**:轮首不是唯一可能失效的位置——上下文在轮内被改写(工具结果、
+  重试、压缩等)时,后面的 step 同样会判为 miss。它们也各出一条,文案为
+  `Cache miss at step N: …`:轮级 `idle`(距上一轮结束)对轮中事件没有意义,改用 step 号
+  定位。同一轮的多条提示按 step 升序紧贴该轮的过程摘要行排列。
 - 纯文本,无 emoji,不自动消失,刷新页面后随会话投影自然消失。
 
 当 provider 回 usage 但不回 `cacheReadTokens`/`cacheWriteTokens`,且从未出现过任何
@@ -127,7 +132,10 @@ localStorage.setItem('dsh-cache-miss:debug', '1'); location.reload()
 ```
 
 之后**每一轮**都会显示一条带 `[debug]` 前缀的强制行(命中轮也显示),因此可以直接
-看到它究竟落在哪。关闭:
+看到它究竟落在哪。调试行还带上本轮测得的时间事实,例如
+`[debug] 强制显示(本轮无 miss)· turn 43 step 1 · idle 25455m · ttft 1.6s`;
+快照里找不到计时表时写 `idle unavailable (no turn timings)`——这样核心再次改动快照来源时,
+一眼就能看出是"拿不到"而不是真的空闲了 0 秒。关闭:
 
 ```js
 localStorage.removeItem('dsh-cache-miss:debug'); location.reload()
@@ -151,14 +159,27 @@ localStorage.removeItem('dsh-cache-miss:debug'); location.reload()
   `{key, kind, id, target, data}`(仍返回的 `anchorSeq` / `location` / `visibility`
   供 0.1.x 使用,新核心忽略),`turnTimings` 移入快照的 `legacy` 投影,
   且 `conversation.chat.node` 的 `cache-miss` seat 实测 active。
+- `0.2.1-rc.1`(desktop app):上述契约不变(`uiConversation.events`、`data-turn-process`
+  摘要行、`_centerCol`、结算方言均实测仍在,黄线实测渲染成功)。唯一差异在快照来源:
+  chat 快照由座位以 `useChat` 注入,`useSession` 拿到的是另一份 session 快照(无
+  `turnTimings`),所以两个 hook 都读、按快照形状取—只读 `useSession` 会让每行都显示
+  `0s idle`。
 
 客户端入口声明:核心 `0.1.5` 起宿主内置的是 `@deepseek-ai/dsh-client-modules`
 (`dsh-client-runtime` 在 npm 上止于 `0.1.1-rc.2`,已不再随宿主发布),因此
-`dsh.client.inject` 与 peer 都指向 `dsh-client-modules`;类型仍取自官方
-`@deepseek-ai/*` npm SDK 的 devDependencies。
+`dsh.client.inject` 与 peer 都指向 `dsh-client-modules`。
 
-idle 时长读取 chat 快照的 `turnTimings`,顶层没有时退回 `legacy.turnTimings`;
-两者都拿不到时不猜一个空闲时长(显示 0s),但黄线照常出现——判定本身不依赖 idle。
+类型取自官方 `@deepseek-ai/*` 0.2.1 系列 SDK(devDependencies):Definition 契约来自
+`dsh-client-ui-conversation`,`ChatConversationViewNode` / `ChatNodeDataMap` / 座位
+props 来自 `dsh-client-ui-chat`,`ctx.slots` 来自 `dsh-client-ui-renderer`。0.1 时代的
+`dsh-client-runtime` devDependency 已移除——它只提供类型、早已不随宿主发布,且会把
+`dsh-client-connection@0.0.1-rc.x`(GHSA-8m2g-8cgm-3vcp,本地控制面认证绕过)拖进
+lockfile。0.2 收窄了事件联合类型,不再包含本项目仍支持的 `assistant/chunk` 流式方言,
+因此该方言在 `asStreamEvent` 一处按结构读取,而不是让类型去限制它。
+
+idle 时长按快照形状取:先读 chat 快照的 `turnTimings`(顶层),没有再读它的
+`legacy.turnTimings`,仍未命中再退回 session 快照(0.2 之前的核心把 timings 放在这里);
+都拿不到时不猜一个空闲时长(显示 0s),但黄线照常出现——判定本身不依赖 idle。
 
 
 每次 miss 在浏览器控制台输出一行,带浏览器本地时区时间戳;渲染器用 ref 去重,

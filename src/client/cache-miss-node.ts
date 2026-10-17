@@ -1,10 +1,10 @@
+import type { ChatConversationViewNode } from '@deepseek-ai/dsh-client-ui-chat/client'
 import type {
-  ChatConversationViewNode, ConversationNodeContext, ConversationNodeDefinition,
-} from '@deepseek-ai/dsh-client-runtime/client'
-import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
+  ConversationNodeContext, ConversationNodeDefinition,
+} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { firstTokenTimeFromStream, isCacheAccountingUnavailable, isCacheMiss, isDebugEnabled, type CacheUsage } from './logic'
 
-declare module '@deepseek-ai/dsh-client-ui-conversation/client' {
+declare module '@deepseek-ai/dsh-client-ui-chat/client' {
   interface ChatNodeDataMap {
     /** Yellow cache-miss line published under an assistant reply whose request rebuilt the cache. */
     'cache-miss': CacheMissNodeData
@@ -71,6 +71,17 @@ interface StreamEvent {
   }
 }
 
+/**
+ * Read one accepted event through the structural view above.
+ *
+ * Cores from 0.2 narrowed their event union and no longer name the streamed
+ * `assistant/chunk` dialect this plugin still supports, so the dialect is read
+ * structurally at the one boundary instead of narrowing the published type.
+ */
+function asStreamEvent(event: unknown): StreamEvent {
+  return event as StreamEvent
+}
+
 /** Empty per-step boundaries before any event of the step is observed. */
 function emptyState(turn: number, step: number): CacheMissState {
   return {
@@ -118,20 +129,23 @@ function isTokenDeltaEvent(event: StreamEvent): boolean {
 export const cacheMissDefinition: ConversationNodeDefinition<CacheMissState> = {
   kind: 'cache-miss',
   target: 'chat',
-  match: (event) => {
+  match: (raw) => {
+    const event = asStreamEvent(raw)
     if (event.type !== 'step/start' && event.type !== 'assistant/chunk' && event.type !== 'assistant/message') return null
     const { turn, step } = event.data as { turn: number; step: number }
     return { id: stepIdFor(turn, step), role: event.type === 'step/start' ? 'start' : 'update' }
   },
   start: (_context, match) => {
-    if (match.event.type !== 'step/start') throw new Error('cache-miss start requires step/start')
-    const { turn, step } = match.event.data as { turn: number; step: number }
-    return { ...emptyState(turn, step), stepStartTime: match.event.time }
+    const event = asStreamEvent(match.event)
+    if (event.type !== 'step/start') throw new Error('cache-miss start requires step/start')
+    const { turn, step } = event.data as { turn: number; step: number }
+    return { ...emptyState(turn, step), stepStartTime: event.time }
   },
   update: (context, match) => {
-    const event = match.event
+    const event = asStreamEvent(match.event)
     if (event.type === 'assistant/chunk') {
       const chunk = event.data.chunk
+      if (chunk === undefined) return context.state
       if (chunk.type === 'usage') {
         const usage = chunk.usage as CacheUsage
         return {
@@ -173,10 +187,11 @@ export const cacheMissDefinition: ConversationNodeDefinition<CacheMissState> = {
     return context.state
   },
   publication: (match) => {
+    const event = asStreamEvent(match.event)
     // The miss becomes knowable the moment the usage chunk lands; publish then.
     // step/start opens state only, and non-usage chunks do not change the line.
-    if (match.event.type === 'assistant/chunk' && match.event.data.chunk.type === 'usage') return 'immediate'
-    if (match.event.type === 'assistant/message') return 'immediate'
+    if (event.type === 'assistant/chunk' && event.data.chunk?.type === 'usage') return 'immediate'
+    if (event.type === 'assistant/message') return 'immediate'
     return 'none'
   },
   buildLocationData: () => null,

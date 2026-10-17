@@ -4,6 +4,7 @@ import {
   firstTokenTimeFromStream,
   formatLine,
   formatLocalTime,
+  formatDebugLine,
   formatUnconfirmedLine,
   getLineStatus,
   isCacheAccountingUnavailable,
@@ -89,6 +90,24 @@ describe('formatUnconfirmedLine', () => {
   })
 })
 
+describe('formatDebugLine', () => {
+  it('names itself as forced and reports the measured facts', () => {
+    const line = formatDebugLine({ turn: 43, step: 1, idleMs: 3 * 60_000, hasTimings: true, ttftMs: 2_100 })
+    expect(line).toBe('[debug] 强制显示（本轮无 miss）· turn 43 step 1 · idle 3m · ttft 2.1s')
+  })
+
+  it('says the timings are unavailable instead of claiming a 0s idle', () => {
+    const line = formatDebugLine({ turn: 7, step: 2, idleMs: 0, hasTimings: false, ttftMs: 0 })
+    expect(line).toContain('idle unavailable (no turn timings)')
+    expect(line).not.toContain('0s')
+  })
+
+  it('omits TTFT when the step recorded none', () => {
+    const line = formatDebugLine({ turn: 7, step: 2, idleMs: 30_000, hasTimings: true, ttftMs: 0 })
+    expect(line).toBe('[debug] 强制显示（本轮无 miss）· turn 7 step 2 · idle 30s')
+  })
+})
+
 describe('formatLine', () => {
   it('formats the canonical line', () => {
     const line = formatLine({ idleMs: 3 * 60_000, rebilledTokens: 182_000, cacheReadTokens: undefined, ttftMs: 2_100 })
@@ -119,6 +138,18 @@ describe('formatLine', () => {
     expect(formatLine({ idleMs: 0, rebilledTokens: 999, cacheReadTokens: undefined, ttftMs: 0 }))
       .toBe('Cache miss after 0s idle: 1k tokens re-billed')
   })
+
+  it('reports a mid-Turn miss by step instead of the Turn-level idle gap', () => {
+    // Something invalidated the cache at step 17 of this Turn; the gap since the
+    // previous Turn ended says nothing about that step, so the line names the step.
+    expect(formatLine({ idleMs: 17 * 24 * 3_600_000, rebilledTokens: 25_639, cacheReadTokens: 51_712, ttftMs: 1_600, step: 17 }))
+      .toBe('Cache miss at step 17: 26k tokens re-billed · 52k cached · ttft 1.6s ↑')
+  })
+
+  it('keeps the canonical line for the Turn\'s first request', () => {
+    expect(formatLine({ idleMs: 3 * 60_000, rebilledTokens: 22_000, cacheReadTokens: 0, ttftMs: 1_200, step: 1 }))
+      .toBe('Cache miss after 3m idle: 22k tokens re-billed · 0k cached · ttft 1.2s ↑')
+  })
 })
 
 describe('getLineStatus', () => {
@@ -126,6 +157,12 @@ describe('getLineStatus', () => {
     const s = getLineStatus({ usage: { inputTokens: 10_000, cacheReadTokens: 0 }, idleMs: 90_000, ttftMs: 1200, hasPriorTurn: true, hasCacheEvidence: true })
     expect(s.kind).toBe('show')
     expect(s.line).toBe('Cache miss after 1m idle: 10k tokens re-billed · 0k cached · ttft 1.2s ↑')
+  })
+
+  it('labels a mid-Turn step with its step number', () => {
+    const s = getLineStatus({ usage: { inputTokens: 25_639, cacheReadTokens: 51_712 }, idleMs: 90_000, ttftMs: 1600, step: 17, hasPriorTurn: true, hasCacheEvidence: true })
+    expect(s.kind).toBe('show')
+    expect(s.line).toBe('Cache miss at step 17: 26k tokens re-billed · 52k cached · ttft 1.6s ↑')
   })
 
   it('returns an unconfirmed status when usage lacks cache fields and the provider has no evidence', () => {

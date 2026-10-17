@@ -76,6 +76,9 @@ export interface LineFacts {
   /** Cached-read portion of the same prefill, or undefined when the provider reported none. */
   cacheReadTokens: number | undefined
   ttftMs: number
+  /** Step inside the Turn. Anything past the Turn's first request is a mid-Turn
+   * cache invalidation, whose relevant fact is which step it happened at. */
+  step?: number
 }
 
 function formatIdle(ms: number): string {
@@ -163,14 +166,22 @@ export function formatLocalTime(epochMs: number): string {
 
 /**
  * Render one cache-miss line.
+ *
+ * The Turn's first request is reported with the idle gap since the previous Turn
+ * — that gap is what usually expired the cache. A later step of the same Turn
+ * missed because something invalidated the cache mid-Turn, so it is reported by
+ * step instead: the Turn-level gap says nothing about that step.
+ *
  * @param facts - idle, re-billed (uncached) token count, optional cached-read
- *   count, and TTFT (ms; 0 = absent).
+ *   count, TTFT (ms; 0 = absent), and the step inside the Turn.
  * @returns the single-line message, without leading/trailing punctuation.
  */
 export function formatLine(facts: LineFacts): string {
-  const idle = formatIdle(facts.idleMs)
   const rebilled = formatTokens(facts.rebilledTokens)
-  const body = `Cache miss after ${idle} idle: ${rebilled} tokens re-billed`
+  const step = facts.step ?? 1
+  const body = step > 1
+    ? `Cache miss at step ${step}: ${rebilled} tokens re-billed`
+    : `Cache miss after ${formatIdle(facts.idleMs)} idle: ${rebilled} tokens re-billed`
   const tail: string[] = []
   if (typeof facts.cacheReadTokens === 'number' && facts.cacheReadTokens >= 0) {
     tail.push(`${formatCached(facts.cacheReadTokens)} cached`)
@@ -275,6 +286,37 @@ export function resolveTurnTimings(snapshot: unknown): ReadonlyMap<number, TurnT
   return nested instanceof Map ? (nested as ReadonlyMap<number, TurnTiming>) : undefined
 }
 
+/** Inputs the opt-in debug line reports. */
+export interface DebugLineInput {
+  /** Turn number. */
+  turn: number
+  /** Step number inside that Turn. */
+  step: number
+  /** Idle gap the renderer measured, in ms. */
+  idleMs: number
+  /** Whether any injected snapshot carried a turn-timing map at all. */
+  hasTimings: boolean
+  /** First-token latency in ms; 0 when the step recorded none. */
+  ttftMs: number
+}
+
+/**
+ * Render the opt-in debug line.
+ *
+ * It names itself as forced — never masquerading as a genuine notice — then
+ * reports the facts a normal line cannot show: the idle gap it measured, whether
+ * a turn-timing map was found in any snapshot, and TTFT when the step recorded
+ * one. That makes a core update checkable in one glance: a missing timings
+ * source reads `idle unavailable` instead of a plausible-looking `0s`.
+ *
+ * @param input - turn/step identity plus the resolved timing facts.
+ */
+export function formatDebugLine(input: DebugLineInput): string {
+  const idle = input.hasTimings ? `idle ${formatIdle(input.idleMs)}` : 'idle unavailable (no turn timings)'
+  const ttft = input.ttftMs > 0 ? ` · ttft ${formatTtft(input.ttftMs)}` : ''
+  return `[debug] 强制显示（本轮无 miss）· turn ${input.turn} step ${input.step} · ${idle}${ttft}`
+}
+
 /** Facts about the turn's timing, resolved from the conversation snapshot. */
 export interface TurnTimingFacts {
   /** Whether any prior turn exists. Turn numbers are global and monotonic
@@ -319,6 +361,8 @@ export interface LineInput {
   usage: CacheUsage | undefined
   idleMs: number
   ttftMs: number
+  /** Step inside the Turn; past 1 means the cache was invalidated mid-Turn. */
+  step?: number
   /** True when any prior turn exists (turn > 1; turn numbers are global and
    * monotonic, so window cropping or a missing turn/end must not turn a real
    * miss into a cold start). False means the first turn of a fresh cache,
@@ -366,6 +410,7 @@ export function getLineStatus(input: LineInput): LineStatus {
       rebilledTokens: usage.inputTokens,
       cacheReadTokens: usage.cacheReadTokens,
       ttftMs: input.ttftMs,
+      ...(input.step === undefined ? {} : { step: input.step }),
     }),
   }
 }
