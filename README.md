@@ -30,7 +30,7 @@ Cache miss after 3m idle · 182k tokens re-billed (turn ~$0.027) · 0.8k cached 
   整段 prompt 重算；核心分类不覆盖这一项，由插件在同一份规范化 config 上做等值比较补上，可与分类叠加。
 - `session used (~$…)` —— 会话已用量（已载入窗口口径的近似金额），`used` 标明这是累计而不是本次。
 
-价格取自 [models.dev](https://models.dev/api.json) 的 DeepSeek 价目快照，直接按它的美元单价显示（不做汇率换算，`~` 明示估算）；快照随包发布，不在浏览器里请求外部接口。峰谷/节假日这类分时价是单一供应商的定价策略，插件不写死；模型匹配不到价目表时不显示金额（不编价格）。金额只算 prompt 部分（未命中输入 + 命中缓存读），不含输出 token。
+价格取自 [models.dev](https://models.dev/api.json) 的 DeepSeek 价目，直接按它的美元单价显示（不做汇率换算，`~` 明示估算）。快照随包发布，**平时不联网**；只有遇到快照里查不到的模型（新模型发布、relay 换了拼写）才会后台取一次实时价目，存进 localStorage 并当场生效，所以换个模型不用等插件发版。取不到（离线、请求失败）就继续用快照，不显示金额而不是编一个价格。峰谷/节假日这类分时价是单一供应商的定价策略，插件不写死。金额只算 prompt 部分（未命中输入 + 命中缓存读），不含输出 token。
 
 纯前端展示：不写入 session log，不修改 DSH 源码，也不占用 turn-tail 链，因此不会与产物文件行冲突（例如 `DSH-better-sidebar`）。
 

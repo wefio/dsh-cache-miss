@@ -43,13 +43,17 @@ Cache miss after 3m idle · 182k tokens re-billed (turn ~$0.027) · 0.8k cached 
   `(~system+config)`.
 - `session used (~$…)` — the session's consumed amount so far, over the loaded window.
 
-Prices come from the [models.dev](https://models.dev/api.json) DeepSeek snapshot and
+Prices come from the [models.dev](https://models.dev/api.json) DeepSeek catalog and
 are shown in its own USD units — no exchange-rate conversion, with `~` marking an
-estimate; the snapshot ships with the package
-instead of being fetched from the browser. Peak/off-peak pricing is a single-vendor
-policy and is deliberately not hard-coded. An unmatched model shows no amount
-rather than a made-up price. Amounts cover the prompt only (uncached input plus
-cache reads), never output tokens.
+estimate. The snapshot ships with the package, so the normal path is offline: it is
+only when a line meets a model the snapshot cannot price (a newly released model, a
+relay reporting a new spelling) that the page fetches the live catalog once in the
+background, stores the DeepSeek subset in localStorage, and re-renders the line with
+amounts — so a new model arrives without a plugin release. If that fetch fails or the
+page is offline, the snapshot stays in charge and an unmatched model shows no amount
+rather than a made-up price. Peak/off-peak pricing is a single-vendor policy and is
+deliberately not hard-coded. Amounts cover the prompt only (uncached input plus cache
+reads), never output tokens.
 
 It is pure presentation: nothing is written to the session log, no DSH source
 is modified, and it does not take the turn-tail chain, so it does not collide

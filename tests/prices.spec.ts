@@ -3,6 +3,7 @@ import {
   formatCost,
   loadedPrefillTotals,
   prefillCost,
+  resolveIn,
   resolveModelPrice,
   type ModelPrice,
 } from '../src/client/prices'
@@ -27,6 +28,27 @@ describe('resolveModelPrice', () => {
     expect(resolveModelPrice(undefined)).toBeUndefined()
     expect(resolveModelPrice(42)).toBeUndefined()
     expect(resolveModelPrice('')).toBeUndefined()
+  })
+})
+
+describe('resolveIn', () => {
+  const catalog: Record<string, ModelPrice> = {
+    'new-model': { input: 2, cacheRead: 0.2, output: 8 },
+  }
+
+  it('resolves a newly listed model against a refreshed catalog', () => {
+    expect(resolveIn(catalog, 'new-model')).toEqual({ input: 2, cacheRead: 0.2, output: 8 })
+    expect(resolveIn(catalog, 'vendor/new-model')).toBeDefined()
+  })
+
+  it('still applies the spelling tolerance to that catalog', () => {
+    expect(resolveIn(catalog, 'NEW-MODEL')).toBeDefined()
+    expect(resolveIn(catalog, 'new-model-0813')).toBeDefined()
+  })
+
+  it('returns undefined for ids the catalog does not list', () => {
+    expect(resolveIn(catalog, 'deepseek-flash')).toBeUndefined()
+    expect(resolveIn(catalog, '')).toBeUndefined()
   })
 })
 
@@ -127,6 +149,8 @@ describe('formatLine with amounts', () => {
   })
 
 })
+
+
 
 
 

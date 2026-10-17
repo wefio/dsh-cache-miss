@@ -1,4 +1,5 @@
 import { MODEL_PRICES, type ModelPrice } from './prices.gen'
+import { priceCatalog, requestPriceRefresh } from './prices-live'
 
 export { MODEL_PRICES, PRICE_SNAPSHOT, PRICE_SOURCE, type ModelPrice } from './prices.gen'
 
@@ -23,7 +24,7 @@ export interface PrefillCost {
 }
 
 /**
- * Resolve a provider-reported model id against the models.dev snapshot.
+ * Resolve a provider-reported model id inside one catalog.
  *
  * Providers report ids in several spellings (`deepseek-flash`,
  * `deepseek/deepseek-v4-flash`, `deepseek-v4-flash-0813`), so the id is matched
@@ -31,19 +32,54 @@ export interface PrefillCost {
  * removed. An unknown model yields undefined and the line omits the amounts —
  * a made-up price is worse than no price.
  *
+ * @param catalog - price rows to resolve against.
  * @param model - model id from the assistant message source, when reported.
  */
-export function resolveModelPrice(model: unknown): ModelPrice | undefined {
+export function resolveIn(
+  catalog: Readonly<Record<string, ModelPrice>>,
+  model: unknown,
+): ModelPrice | undefined {
   if (typeof model !== 'string') return undefined
   const key = model.trim().toLowerCase()
   if (key === '') return undefined
-  const direct = MODEL_PRICES[key]
+  const direct = catalog[key]
   if (direct !== undefined) return direct
   const tail = key.includes('/') ? key.slice(key.lastIndexOf('/') + 1) : key
-  const exactTail = MODEL_PRICES[tail]
+  const exactTail = catalog[tail]
   if (exactTail !== undefined) return exactTail
   const withoutDate = tail.replace(/-\d{4,8}$/, '')
-  return MODEL_PRICES[withoutDate]
+  return catalog[withoutDate]
+}
+
+/**
+ * Resolve a provider-reported model id against the prices in force.
+ *
+ * A catalog refreshed from models.dev in the background wins, so a new model or a
+ * reprice reaches existing installs without publishing a release; the bundled
+ * snapshot answers when nothing has been refreshed (offline, first run, blocked
+ * storage). Both go through the same spelling-tolerant lookup.
+ *
+ * @param model - model id from the assistant message source, when reported.
+ */
+export function resolveModelPrice(model: unknown): ModelPrice | undefined {
+  return resolveIn(priceCatalog(), model) ?? resolveIn(MODEL_PRICES, model)
+}
+
+/**
+ * Make sure a model can be priced, fetching the live catalog when it cannot.
+ *
+ * Called with the model of every rendered line. A model the bundled snapshot
+ * knows costs nothing; a model it does not know — a newly released one, or one a
+ * relay reports with a new spelling — triggers one background refresh, deduplicated
+ * and rate-limited inside {@link requestPriceRefresh}. Line lengths and the offline
+ * case behave exactly as before: an unresolvable model simply omits amounts.
+ *
+ * @param model - model id from the assistant message source, when reported.
+ */
+export function ensurePriceModel(model: unknown): void {
+  if (resolveIn(MODEL_PRICES, model) !== undefined) return
+  if (resolveIn(priceCatalog(), model) !== undefined) return
+  requestPriceRefresh()
 }
 
 /**
@@ -142,6 +178,8 @@ export function formatCost(usd: number): string {
   // where most single-request amounts live (~.067, ~.134).
   return usd >= 1 ? usd.toFixed(2) : usd.toFixed(3)
 }
+
+
 
 
 

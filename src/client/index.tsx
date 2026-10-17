@@ -1,4 +1,4 @@
-import { createElement, useEffect, useRef, useState } from 'react'
+import { createElement, useEffect, useReducer, useRef, useState } from 'react'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-chat/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
@@ -9,8 +9,9 @@ import {
   resolveTurnTimings, turnProcessSelector, ttftMs,
   type LineStatus,
 } from './logic'
-import { loadedPrefillTotals, prefillCost, resolveModelPrice } from './prices'
+import { ensurePriceModel, loadedPrefillTotals, prefillCost, resolveModelPrice } from './prices'
 import { lineCost } from './line-cost'
+import { subscribePrices } from './prices-live'
 import { createPrefixDefinition, createSystemPromptDefinition, readPrefixChange, type PromptInspector, type SystemInspector } from './prefix-node'
 
 /** Yellow cache-miss single line rendered under the turn's first assistant. */
@@ -323,6 +324,15 @@ function CacheMissLine(props: CacheMissLineProps): React.ReactElement | null {
   const chatTurnTimings = props.useChat?.((snapshot) => resolveTurnTimings(snapshot))
   const sessionTurnTimings = props.useSession?.((snapshot) => resolveTurnTimings(snapshot))
   const turnTimings = chatTurnTimings ?? sessionTurnTimings
+  // Prices arrive asynchronously only when a model is not in the bundled snapshot;
+  // a landed refresh bumps this counter so the line renders again with amounts.
+  const [, bumpPriceRender] = useReducer((tick: number) => tick + 1, 0)
+  useEffect(() => subscribePrices(bumpPriceRender), [])
+  // Ask for the live catalog only for a model the snapshot cannot price, which is
+  // exactly the "a new model appeared" case — no timer, no fetch on every load.
+  useEffect(() => {
+    ensurePriceModel(props.node?.data?.model)
+  }, [props.node?.data?.model])
   // Loaded assistant records, for the Turn/session amounts the line reports as
   // further segments. The array identity is the core's own, so it is a stable
   // selection and only changes when the loaded nodes do.
@@ -519,6 +529,7 @@ const DEBUG_BUILD_TAG = 'release-0.2'
 
 /** Register the cache-miss Definition (best-effort) and its keyed chat-node renderer. */
 export function apply(ctx: Context): void {
+
   if (isDebugEnabled() && typeof document !== 'undefined') {
     document.documentElement.setAttribute('data-dsh-cache-miss-debug', DEBUG_BUILD_TAG)
   }
@@ -569,6 +580,9 @@ export function apply(ctx: Context): void {
     }, CacheMissLine)
   })
 }
+
+
+
 
 
 
