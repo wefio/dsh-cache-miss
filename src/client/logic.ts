@@ -4,6 +4,8 @@
  * and calls these; the renderer formats via {@link formatLine}.
  */
 
+import { CURRENCY, formatCost } from './prices'
+
 /** The token-accounting subset this plugin reads, aligned with the official
  * `TokenUsage` contract (@deepseek-ai/dsh-llm). Counts are DISJOINT;
  * cache fields are optional because some providers report none. */
@@ -68,6 +70,18 @@ export function isCacheMiss(usage: CacheUsage | undefined, hasCacheEvidence = tr
   return hitRatio < MISS_HIT_RATIO
 }
 
+/** Approximate prefill cost attached to one line, in USD (models.dev list prices). */
+export interface LineCost {
+  /** Cost of the uncached (re-billed) input of this step. */
+  rebilled: number
+  /** Cost of the cache-hit input of this step, or undefined when unreported. */
+  cached: number | undefined
+  /** Prompt cost of the whole Turn, over the loaded window. */
+  turn?: number
+  /** Prompt cost of the session, over the loaded window. */
+  session?: number
+}
+
 /** Presentable facts for one miss line. */
 export interface LineFacts {
   idleMs: number
@@ -79,6 +93,8 @@ export interface LineFacts {
   /** Step inside the Turn. Anything past the Turn's first request is a mid-Turn
    * cache invalidation, whose relevant fact is which step it happened at. */
   step?: number
+  /** Approximate amounts; omitted when the model has no list price. */
+  cost?: LineCost
 }
 
 function formatIdle(ms: number): string {
@@ -164,6 +180,14 @@ export function formatLocalTime(epochMs: number): string {
   return new Date(epochMs).toLocaleString()
 }
 
+/** One approximate amount as a bracketed suffix: empty when unknown, and empty
+ * when it would round to a 0.000 display — that is noise, not information. */
+function amount(usd: number | undefined): string {
+  if (usd === undefined) return ''
+  const formatted = formatCost(usd)
+  return formatted === '0.000' ? '' : ` (~${CURRENCY}${formatted})`
+}
+
 /**
  * Render one cache-miss line.
  *
@@ -172,21 +196,28 @@ export function formatLocalTime(epochMs: number): string {
  * missed because something invalidated the cache mid-Turn, so it is reported by
  * step instead: the Turn-level gap says nothing about that step.
  *
+ * Amounts are approximate RMB derived from the models.dev list price, so they
+ * ride in brackets behind the token counts they price; levels stack as further
+ * segments (`轮` / `会话`), never as a table.
+ *
  * @param facts - idle, re-billed (uncached) token count, optional cached-read
- *   count, TTFT (ms; 0 = absent), and the step inside the Turn.
+ *   count, TTFT (ms; 0 = absent), the step inside the Turn, and optional cost.
  * @returns the single-line message, without leading/trailing punctuation.
  */
 export function formatLine(facts: LineFacts): string {
   const rebilled = formatTokens(facts.rebilledTokens)
+  const cost = facts.cost
   const step = facts.step ?? 1
   const body = step > 1
-    ? `Cache miss at step ${step}: ${rebilled} tokens re-billed`
-    : `Cache miss after ${formatIdle(facts.idleMs)} idle: ${rebilled} tokens re-billed`
+    ? `Cache miss at step ${step}: ${rebilled} tokens re-billed${amount(cost?.rebilled)}`
+    : `Cache miss after ${formatIdle(facts.idleMs)} idle: ${rebilled} tokens re-billed${amount(cost?.rebilled)}`
   const tail: string[] = []
   if (typeof facts.cacheReadTokens === 'number' && facts.cacheReadTokens >= 0) {
-    tail.push(`${formatCached(facts.cacheReadTokens)} cached`)
+    tail.push(`${formatCached(facts.cacheReadTokens)} cached${amount(cost?.cached)}`)
   }
   if ((facts.ttftMs ?? 0) > 0) tail.push(`ttft ${formatTtft(facts.ttftMs)} ↑`)
+  if (cost?.turn !== undefined) tail.push(`轮${amount(cost.turn)}`)
+  if (cost?.session !== undefined) tail.push(`会话${amount(cost.session)}`)
   return tail.length > 0 ? `${body} · ${tail.join(' · ')}` : body
 }
 
@@ -363,6 +394,8 @@ export interface LineInput {
   ttftMs: number
   /** Step inside the Turn; past 1 means the cache was invalidated mid-Turn. */
   step?: number
+  /** Approximate amounts; omitted when the model has no list price. */
+  cost?: LineCost
   /** True when any prior turn exists (turn > 1; turn numbers are global and
    * monotonic, so window cropping or a missing turn/end must not turn a real
    * miss into a cold start). False means the first turn of a fresh cache,
@@ -411,6 +444,8 @@ export function getLineStatus(input: LineInput): LineStatus {
       cacheReadTokens: usage.cacheReadTokens,
       ttftMs: input.ttftMs,
       ...(input.step === undefined ? {} : { step: input.step }),
+      ...(input.cost === undefined ? {} : { cost: input.cost }),
     }),
   }
 }
+

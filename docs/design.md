@@ -55,12 +55,15 @@ cache 字段,插件无法区分「完全 miss」与「命中但不报明细」,�
 轮首第一条 assistant 回复正下方,渲染一条黄色等宽单行,形如:
 
 ```
-Cache miss after 3m idle: 182k tokens re-billed · 0.8k cached · ttft 2.1s ↑
+Cache miss after 3m idle: 182k tokens re-billed (~¥0.20) · 0.8k cached · ttft 2.1s ↑ · 轮 (~¥0.31) · 会话 (~¥2.90)
 ```
 
 - `idle`:距上一轮结束的空闲时长,>= 60s 显示为分钟,否则为秒。
 - `re-billed`:该请求 `inputTokens`(未命中部分)的千分位缩写(k)。
 - `cached`:该请求 `cacheReadTokens`(命中部分)的千分位缩写(k),provider 未回报时不显示。
+- `(~¥…)`:该 token 桶的近似金额,永远放在括号里、以 `~` 明示是估算;token 数本身不加括号。
+  金额只算 **prompt 部分**(未命中输入 + 命中的缓存读),不含 output——本插件关心的是缓存成本,
+  三个层级的金额采用同一口径才可比。
 - `ttft`:该条 assistant 首 token 时延(TTFT)= 首个 token 事件时间 - `step/start`
   事件时间,秒、一位小数,末尾加向上箭头示意重建 prefill 通常更慢;边界缺失时不显示该段。
   流式方言下取首个非空 delta 的事件时间;结算方言下取 `assistant/message.stream` 中
@@ -70,6 +73,9 @@ Cache miss after 3m idle: 182k tokens re-billed · 0.8k cached · ttft 2.1s ↑
   重试、压缩等)时,后面的 step 同样会判为 miss。它们也各出一条,文案为
   `Cache miss at step N: …`:轮级 `idle`(距上一轮结束)对轮中事件没有意义,改用 step 号
   定位。同一轮的多条提示按 step 升序紧贴该轮的过程摘要行排列。
+- **步/轮/会话三级就是三段**:不再做表格。步级金额跟在它自己的 token 桶后面;
+  `轮` 与 `会话` 各追加一段,取自已载入的 assistant 记录(`legacy.nodes`)按当前模型单价
+  求和——所以它是"已载入窗口"的口径,不是逐笔账单。
 - 纯文本,无 emoji,不自动消失,刷新页面后随会话投影自然消失。
 
 当 provider 回 usage 但不回 `cacheReadTokens`/`cacheWriteTokens`,且从未出现过任何
@@ -79,6 +85,20 @@ cache 字段时,插件无法区分「完全 miss」与「命中但不报明细�
 provider 一次的更详细 warning(含 turn/step、provider、`inputTokens` 与缺失字段说明)。
 一旦该 provider 出现过任一 cache 字段,后续无字段的请求按完全 miss 正常显示黄线。
 不做 TTFT 启发式兜底:用户间隔可能远超 TTFT 阈值,无法可靠区分 cache miss 与网络/负载慢。
+
+## 计价口径
+
+价格取自 [models.dev](https://models.dev/api.json) 的 `deepseek` provider 快照,由
+`pnpm run prices` 重新生成 `src/client/prices.gen.ts`。快照随包提交,不在浏览器里请求外部
+API:那会给每次翻页多一个跨域请求,而且供应商接口抖动不该影响一条提示行的渲染。
+
+- 金额 = 未命中输入 × `input` + 命中的缓存读 × `cache_read` + 缓存写入 × `input`,
+  单价为 models.dev 的 USD / 1M token;
+- 显示按固定汇率折算人民币(`CNY_PER_USD = 7.2`),`~` 明示估算,实际扣费以账单为准;
+- 不做峰谷/节假日分时计价:那是单一供应商的定价策略,插件不为任何供应商写死时段规则;
+- 输出 token 不计入金额——提示行回答的是"这次 prompt 花了多少";
+- 模型名匹配不到快照时不显示金额(宁可没有,不编一个),其余字段照常;
+- 不做"换窗口建议":对会继续使用同一会话的人,会话记录本身通常比省下的缓存费更重要。
 
 ## 渲染与落点
 

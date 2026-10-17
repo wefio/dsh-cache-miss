@@ -19,7 +19,7 @@ This plugin renders, under each assistant reply whose request missed, a single
 yellow line, live, as soon as that step's `usage` chunk arrives:
 
 ```
-Cache miss after 3m idle: 182k tokens re-billed · 0.8k cached · ttft 2.1s ↑
+Cache miss after 3m idle: 182k tokens re-billed (~¥0.20) · 0.8k cached · ttft 2.1s ↑ · 轮 (~¥0.31) · 会话 (~¥2.90)
 ```
 ![cache-miss notice](cache-miss.png)
 
@@ -27,8 +27,19 @@ Cache miss after 3m idle: 182k tokens re-billed · 0.8k cached · ttft 2.1s ↑
 - `re-billed` — the request's uncached input tokens (abbreviated to k).
 - `cached` — the cached-read portion of the same prefill (when the provider
   reports it), so the rebilled-vs-cached split stays unambiguous.
+- `(~¥…)` — the bucket's approximate amount, always bracketed and marked `~`
+  as an estimate; token counts stay unbracketed.
 - `ttft` — first-token latency, when available; the up arrow hints a rebuild
   prefill usually ran slower.
+- `轮` / `会话` — the Turn and session totals on the same basis, each as one more
+  segment (three levels need no table).
+
+Prices come from the [models.dev](https://models.dev/api.json) DeepSeek snapshot,
+converted to approximate RMB at a fixed rate; the snapshot ships with the package
+instead of being fetched from the browser. Peak/off-peak pricing is a single-vendor
+policy and is deliberately not hard-coded. An unmatched model shows no amount
+rather than a made-up price. Amounts cover the prompt only (uncached input plus
+cache reads), never output tokens.
 
 It is pure presentation: nothing is written to the session log, no DSH source
 is modified, and it does not take the turn-tail chain, so it does not collide

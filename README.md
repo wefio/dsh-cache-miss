@@ -13,14 +13,18 @@ DSH 网页插件：在一轮的**第一条 assistant 回复**正下方，以一�
 本插件在轮首第一条 assistant 回复正下方，仅当该请求确为缓存未命中时渲染一条黄色单行：
 
 ```
-Cache miss after 3m idle: 182k tokens re-billed · 0.8k cached · ttft 2.1s ↑
+Cache miss after 3m idle: 182k tokens re-billed (~¥0.20) · 0.8k cached · ttft 2.1s ↑ · 轮 (~¥0.31) · 会话 (~¥2.90)
 ```
 ![缓存未命中提示](cache-miss.png)
 
 - `idle` —— 距上一轮结束的空闲时长。
 - `re-billed` —— 该请求未命中缓存的输入 token 数（缩写为 k）。
 - `cached` —— 同一 prefill 中命中缓存的部分（provider 回报时显示），让“重算量 vs 命中量”一目了然。
+- `(~¥…)` —— 该 token 桶的近似金额，永远在括号里、以 `~` 明示是估算；token 数本身不加括号。
 - `ttft` —— 首 token 时延（取自 assistant timing，可用时显示）；上箭头示意重建 prefill 通常更慢。
+- `轮` / `会话` —— 同一口径的已载入窗口累计金额，各占一段（三级不用表格）。
+
+价格取自 [models.dev](https://models.dev/api.json) 的 DeepSeek 价目快照，按固定汇率折算成近似人民币；快照随包发布，不在浏览器里请求外部接口。峰谷/节假日这类分时价是单一供应商的定价策略，插件不写死；模型匹配不到价目表时不显示金额（不编价格）。金额只算 prompt 部分（未命中输入 + 命中缓存读），不含输出 token。
 
 纯前端展示：不写入 session log，不修改 DSH 源码，也不占用 turn-tail 链，因此不会与产物文件行冲突（例如 `DSH-better-sidebar`）。
 

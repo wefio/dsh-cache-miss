@@ -7,9 +7,10 @@ import { cacheMissDefinition, type CacheMissNodeData } from './cache-miss-node'
 import {
   deriveTurnTimingFacts, formatDebugLine, formatLocalTime, getLineStatus, hasCacheFields, isDebugEnabled,
   resolveTurnTimings, turnProcessSelector, ttftMs,
+  type LineCost,
   type LineStatus,
-  type TurnTiming,
 } from './logic'
+import { loadedPrefillTotals, prefillCost, resolveModelPrice } from './prices'
 
 /** Yellow cache-miss single line rendered under the turn's first assistant. */
 const LINE_STYLE = {
@@ -248,7 +249,7 @@ function useTurnProcessAnchor(
 }
 
 /** A snapshot-selector hook injected by the keyed chat seat. */
-type SnapshotSelector<T> = (selector: (snapshot: any) => T) => T
+type SnapshotSelector = <T>(selector: (snapshot: any) => T) => T
 
 /** Minimal props this renderer actually reads (node data + snapshot hooks). */
 interface CacheMissLineProps {
@@ -257,12 +258,12 @@ interface CacheMissLineProps {
    * ChatSnapshot selector. Cores from 0.2 inject it into the keyed seat; the
    * chat view keeps turn timings in that snapshot's `legacy` projection.
    */
-  useChat?: SnapshotSelector<ReadonlyMap<number, TurnTiming> | undefined>
+  useChat?: SnapshotSelector
   /**
    * Session-snapshot selector. Cores before 0.2 delivered the turn timings on
    * this snapshot; kept as the fallback source when `useChat` is absent.
    */
-  useSession?: SnapshotSelector<ReadonlyMap<number, TurnTiming> | undefined>
+  useSession?: SnapshotSelector
 }
 
 /**
@@ -321,15 +322,28 @@ function CacheMissLine(props: CacheMissLineProps): React.ReactElement | null {
   const chatTurnTimings = props.useChat?.((snapshot) => resolveTurnTimings(snapshot))
   const sessionTurnTimings = props.useSession?.((snapshot) => resolveTurnTimings(snapshot))
   const turnTimings = chatTurnTimings ?? sessionTurnTimings
+  // Loaded assistant records, for the Turn/session amounts the line reports as
+  // further segments. The array identity is the core's own, so it is a stable
+  // selection and only changes when the loaded nodes do.
+  const loadedNodes = props.useChat?.((snapshot) => (snapshot as { legacy?: { nodes?: unknown } }).legacy?.nodes)
   const timing = data === undefined
     ? { hasPriorTurn: false, idleMs: 0 }
     : deriveTurnTimingFacts(data.turn, turnTimings)
   const stepTtft = data === undefined ? 0 : ttftMs(data.stepStartTime, data.firstTokenTime)
+  const price = resolveModelPrice(data?.model)
+  const stepCost = price === undefined || data?.usage === undefined ? undefined : prefillCost(price, data.usage)
+  const totals = price === undefined ? undefined : loadedPrefillTotals(loadedNodes, price, data?.turn)
+  const cost: LineCost | undefined = stepCost === undefined ? undefined : {
+    rebilled: stepCost.rebilled,
+    cached: stepCost.cached,
+    ...(totals === undefined ? {} : { turn: totals.turn, session: totals.session }),
+  }
   const decided: LineStatus = data === undefined ? { kind: 'hidden' } : getLineStatus({
     usage: data.usage,
     idleMs: timing.idleMs,
     ttftMs: stepTtft,
     step: data.step,
+    ...(cost === undefined ? {} : { cost }),
     hasPriorTurn: timing.hasPriorTurn,
     hasCacheEvidence,
   })
@@ -508,3 +522,6 @@ export function apply(ctx: Context): void {
     }, CacheMissLine)
   })
 }
+
+
+

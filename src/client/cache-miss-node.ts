@@ -26,6 +26,8 @@ export interface CacheMissState {
   readonly missingCacheFields: boolean
   /** Provider id from the finalized assistant message, when available. */
   readonly provider: string | undefined
+  /** Model id from the finalized assistant message, used to price the request. */
+  readonly model: string | undefined
   /** step/start event time, or null when outside the loaded window. */
   readonly stepStartTime: number | null
   /** First non-empty token delta event time, or null when none recorded. */
@@ -44,6 +46,8 @@ export interface CacheMissNodeData {
   readonly missingCacheFields: boolean
   /** Provider id from the finalized assistant message, when available. */
   readonly provider: string | undefined
+  /** Model id from the finalized assistant message, used to price the request. */
+  readonly model: string | undefined
   /** step/start event time, or null when outside the loaded window. */
   readonly stepStartTime: number | null
   /** First non-empty token delta event time, or null when none recorded. */
@@ -90,6 +94,7 @@ function emptyState(turn: number, step: number): CacheMissState {
     usage: undefined,
     missingCacheFields: false,
     provider: undefined,
+    model: undefined,
     stepStartTime: null,
     firstTokenTime: null,
     missTime: null,
@@ -164,7 +169,7 @@ export const cacheMissDefinition: ConversationNodeDefinition<CacheMissState> = {
       const usage = event.data.usage as CacheUsage | undefined
       // Real AssistantMessage carries `source.provider`; keep `provenance` as a
       // structural fallback for adapters/versions that use the older field.
-      const message = event.data.message as { source?: { provider?: string }; provenance?: { provider?: string } } | undefined
+      const message = event.data.message as { source?: { provider?: string; model?: string }; provenance?: { provider?: string } } | undefined
       const provider = context.state.provider
         ?? message?.source?.provider
         ?? message?.provenance?.provider
@@ -179,6 +184,7 @@ export const cacheMissDefinition: ConversationNodeDefinition<CacheMissState> = {
         missingCacheFields: context.state.missingCacheFields
           || (usage !== undefined && isCacheAccountingUnavailable(usage)),
         provider,
+        model: context.state.model ?? message?.source?.model,
         firstTokenTime: context.state.firstTokenTime
           ?? firstTokenTimeFromStream((event.data as { stream?: unknown }).stream),
         missTime: context.state.missTime ?? event.time,
@@ -222,6 +228,7 @@ export const cacheMissDefinition: ConversationNodeDefinition<CacheMissState> = {
         usage: state.usage,
         missingCacheFields: state.missingCacheFields,
         provider: state.provider,
+        model: state.model,
         stepStartTime: state.stepStartTime,
         firstTokenTime: state.firstTokenTime,
         missTime: state.missTime,
@@ -231,3 +238,4 @@ export const cacheMissDefinition: ConversationNodeDefinition<CacheMissState> = {
 }
 
 export type { ConversationNodeContext }
+
