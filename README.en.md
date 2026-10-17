@@ -58,6 +58,74 @@ It is pure presentation: nothing is written to the session log, no DSH source
 is modified, and it does not take the turn-tail chain, so it does not collide
 with the produced-files row (e.g. `DSH-better-sidebar`).
 
+## Cache and money
+
+**A cached input token and an uncached one differ by 30–50×** (models.dev 2026-10
+prices, USD per 1M tokens):
+
+| Model | Uncached input (`input`) | Cache hit (`cache_read`) | Ratio |
+| --- | --- | --- | --- |
+| `deepseek-v4-flash` | 0.15 | 0.003 | **50×** |
+| `deepseek-v4-pro` | 0.66 | 0.022 | **30×** |
+
+Re-billing 448k tokens costs ~$0.067 on flash; the same prompt read from cache costs
+~$0.0013. **Prompt cost is decided by the hit rate**, and the hit rate is decided by
+the prefix.
+
+### Why one prefix change makes everything expensive
+
+DeepSeek's prefix cache requires a byte-for-byte match from the very first token. The
+system prompt, the tool catalog and the request config (provider, reasoningEffort, …)
+all belong to that prefix — change any of them and every token after the change is
+billed as uncached. In practice a real miss almost always comes from a prefix change
+rather than from cache expiry: a Turn after 27 idle minutes still hit.
+
+### What the line tells you
+
+- `22k tokens re-billed` — the part of this request that was recomputed, i.e. the
+  money that would otherwise have been saved;
+- `(turn ~$…)` / `(step ~$…)` — whether that money rebuilt the whole Turn context or
+  only the prefix one Step changed; when both happened the line gives their sum, and
+  `session used (~$…)` is the running total;
+- `(system prompt changed)` / `(tools changed)` / `(config changed)` — which of them
+  broke the prefix.
+
+### What saves money
+
+1. **Do not change the tool set or load plugins mid-session.** Installing or removing
+   a plugin rewrites the tool catalog and the system prompt, so the next request
+   re-bills everything. Try new plugins in a fresh session instead of churning them
+   inside a long one.
+2. **After switching provider, model or reasoningEffort, do not expect a hit.** That
+   is a different cache namespace, so the whole prompt is billed at full price.
+3. **A long session is cheaper to continue than to restart.** The cache is still
+   there, so the next Turn mostly pays for its increment; a new session starts cold
+   and bills the first Turn in full.
+4. **Change prefix-bearing content rarely** (project instructions, system-prompt-like
+   material): one edit makes everything after it recompute.
+
+### New session or `/compact`?
+
+Both cost one rebuild; the question is what you get for it:
+
+- **Same task, context just too long** → use `/compact`. Compaction rewrites history,
+  so the next Turn re-bills the whole prompt (the line will show it), but the prefix is
+  then stable again and each Turn pays only its increment, with the thread intact.
+- **New task, a direction that went wrong, or a plugin/tool-set change coming** → start
+  a new session. Its first Turn is a cold start (the plugin does not count it as a
+  miss), so you do not pay for rewriting history you are about to abandon, and later
+  prefix changes cannot keep dragging the old context along.
+- **Same task, short context** → neither. Continuing is cheapest; the cache is warm.
+
+In one line: `/compact` buys continuity, a new session buys a clean slate — both pay a
+rebuild, so do not do either often.
+
+### What the numbers mean
+
+Amounts cover the **prompt only** (uncached input plus cache reads), never output
+tokens. Unit prices come from the models.dev catalog in USD, `~` marks an estimate,
+and the official bill is authoritative.
+
 ## Miss definition
 
 `inputTokens` is the disjoint "uncached input only" count and `cacheReadTokens`
