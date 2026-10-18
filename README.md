@@ -1,6 +1,7 @@
 # dsh-cache-miss
 
 [![dsh.so install](https://www.dsh.so/badge/install/dsh-cache-miss.svg)](https://www.dsh.so/artifact/dsh-cache-miss/)
+[![dshbase 实测可装](https://dshbase.com/badges/dsh-cache-miss.svg)](https://dshbase.com/zh/plugins/dsh-cache-miss/)
 
 [English](README.en.md)
 
