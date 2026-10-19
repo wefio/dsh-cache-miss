@@ -3,6 +3,7 @@ import type {
   ConversationNodeContext, ConversationNodeDefinition,
 } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { firstTokenTimeFromStream, isCacheAccountingUnavailable, isCacheMiss, isDebugEnabled, type CacheUsage } from './logic'
+import { recordStepPrompt } from './compaction-node'
 
 declare module '@deepseek-ai/dsh-client-ui-chat/client' {
   interface ChatNodeDataMap {
@@ -167,6 +168,9 @@ export const cacheMissDefinition: ConversationNodeDefinition<CacheMissState> = {
     }
     if (event.type === 'assistant/message') {
       const usage = event.data.usage as CacheUsage | undefined
+      // A settlement is the last word on this step's prompt, so it becomes the
+      // size a following compaction compares against.
+      recordStepPrompt(context.state.usage ?? usage)
       // Real AssistantMessage carries `source.provider`; keep `provenance` as a
       // structural fallback for adapters/versions that use the older field.
       const message = event.data.message as { source?: { provider?: string; model?: string }; provenance?: { provider?: string } } | undefined

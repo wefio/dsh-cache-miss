@@ -13,6 +13,12 @@ import { ensurePriceModel, loadedPrefillTotals, prefillCost, resolveModelPrice }
 import { lineCost } from './line-cost'
 import { noteModel, refreshIfStale, subscribePrices } from './prices-live'
 import { createPrefixDefinition, createSystemPromptDefinition, readPrefixChange, type PromptInspector, type SystemInspector } from './prefix-node'
+import { compactTotals, formatCompactLine } from './compact-cost'
+import { compactionDefinition, type CompactionNodeData } from './compaction-node'
+import {
+  adviceVerdict, formatAdviceLine, predictAdvice, priorFromSamples, readHorizon,
+} from './compact-advice'
+import { adviceDefinition, adviceSamples, type AdviceNodeData } from './advice-node'
 
 /** Yellow cache-miss single line rendered under the turn's first assistant. */
 const LINE_STYLE = {
@@ -26,6 +32,18 @@ const LINE_STYLE = {
 const UNCONFIRMED_STYLE = {
   ...LINE_STYLE,
   color: '#9ca3af',
+} as const
+
+/** Payback ticket for a completed `/compact`: same row, different question. */
+const COMPACT_STYLE = {
+  ...LINE_STYLE,
+  color: '#60a5fa',
+} as const
+
+/** Decision notice for a `/compact` not yet run: the same row, asked forward. */
+const ADVICE_STYLE = {
+  ...LINE_STYLE,
+  color: '#22c55e',
 } as const
 
 /** Marks the line this plugin inserts beside a Turn's process summary row, so a
@@ -444,9 +462,84 @@ function CacheMissLine(props: CacheMissLineProps): React.ReactElement | null {
   return null
 }
 
+/** Module-scoped dedup: one console line per compaction, surviving remounts. */
+const loggedCompactions = new Set<string>()
+
+/** Module-scoped dedup: one console line per step's compaction advice. */
+const loggedAdvice = new Set<string>()
+
+/**
+ * Prices one `/compact` after its rebuild has been measured.
+ *
+ * The node only publishes once the first request after the compaction settles,
+ * because the payback is a division by what that request re-billed — showing a
+ * number before then would mean guessing, which the notice line never does. The
+ * price is resolved here rather than in the node so a late catalog refresh can
+ * still turn an unpriced compaction into a priced one.
+ */
+function CompactionLine(props: { node?: { data?: CompactionNodeData } }): React.ReactElement | null {
+  // Prices can land asynchronously for a model missing from the bundled snapshot.
+  const [, bumpPriceRender] = useReducer((tick: number) => tick + 1, 0)
+  useEffect(() => subscribePrices(bumpPriceRender), [])
+  const data = props.node?.data
+  useEffect(() => {
+    ensurePriceModel(data?.model)
+  }, [data?.model])
+  const facts = data === undefined
+    ? undefined
+    : { A: data.A, B: data.B, U: data.U, S: data.S, Mc: data.Mc }
+  const price = resolveModelPrice(data?.model)
+  const totals = price === undefined || facts === undefined ? undefined : compactTotals(facts, price)
+  const line = facts === undefined || totals === undefined ? undefined : formatCompactLine(facts, totals)
+  useEffect(() => {
+    if (line === undefined || data === undefined) return
+    if (loggedCompactions.has(data.compactionId)) return
+    loggedCompactions.add(data.compactionId)
+    console.info(
+      `[dsh-cache-miss] ${formatLocalTime(data.time ?? Date.now())} compaction: ${line} `
+      + `(dropped ${data.shadowed} tokens, summary re-billed ${data.Mc})`,
+    )
+  }, [line, data?.compactionId, data?.shadowed, data?.Mc, data?.time])
+  if (line === undefined) return null
+  return createElement('div', { style: COMPACT_STYLE }, line)
+}
+
+/**
+ * Recommends whether to run `/compact` at the point the decision is still open.
+ *
+ * The node already decided that this step is worth speaking about (or there
+ * would be no node); the price and the prediction are resolved here, so an
+ * unpriced model or a late catalog refresh simply keeps the line off the page
+ * instead of showing a number that would not survive the refresh.
+ */
+function AdviceLine(props: { node?: { data?: AdviceNodeData } }): React.ReactElement | null {
+  const [, bumpPriceRender] = useReducer((tick: number) => tick + 1, 0)
+  useEffect(() => subscribePrices(bumpPriceRender), [])
+  const data = props.node?.data
+  useEffect(() => {
+    ensurePriceModel(data?.model)
+  }, [data?.model])
+  const facts = data === undefined
+    ? undefined
+    : predictAdvice({ A: data.A, prior: priorFromSamples(adviceSamples()) })
+  const price = resolveModelPrice(data?.model)
+  const verdict = facts === undefined || price === undefined
+    ? undefined
+    : adviceVerdict(facts, price, readHorizon())
+  const line = facts === undefined || verdict === undefined ? undefined : formatAdviceLine(facts, verdict)
+  useEffect(() => {
+    if (line === undefined || data === undefined) return
+    const key = `${data.turn}:${data.step}`
+    if (loggedAdvice.has(key)) return
+    loggedAdvice.add(key)
+    console.info(`[dsh-cache-miss] ${formatLocalTime(data.time ?? Date.now())} turn ${data.turn} step ${data.step}: ${line}`)
+  }, [line, data?.turn, data?.step, data?.time])
+  if (line === undefined) return null
+  return createElement('div', { style: ADVICE_STYLE }, line)
+}
+
 /**
  * Services required by the cache-miss browser half.
- *
  * Only `slots` is a hard dependency (always present on the web surface). The
  * conversation-node registry — where a node Definition is registered — is
  * core-owned and its service key has changed across core versions (this core
@@ -527,7 +620,7 @@ function registerCacheMissDefinition(
 /** Build marker written to `<html>` while debug mode is on, so a page can prove
  * which bundle it is running: the client bundle loads only on page load, and a
  * stale one otherwise looks identical to the current one. */
-const DEBUG_BUILD_TAG = 'release-0.2'
+const DEBUG_BUILD_TAG = 'release-0.3'
 
 /** Register the cache-miss Definition (best-effort) and its keyed chat-node renderer. */
 export function apply(ctx: Context): void {
@@ -541,6 +634,11 @@ export function apply(ctx: Context): void {
   // time this callback fires the registry is guaranteed ACTIVE and `ctx.get`
   // resolves it. The seat still mounts even when registration degrades.
   let definitionRegistered = false
+  // The compaction seat registers once: `inject` may replay after a hot reload,
+  // and a second seat for the same key would render every ticket twice.
+  let compactionSlotRegistered = false
+  // Same one-shot gate for the recommendation seat.
+  let adviceSlotRegistered = false
   ctx.slots.inject('conversation.chat.node', () => {
     if (!definitionRegistered) {
       registerCacheMissDefinition(ctx, (registry) => {
@@ -575,7 +673,36 @@ export function apply(ctx: Context): void {
             console.warn('[dsh-cache-miss] failed to register the request-prefix tracker; prefix changes stay unreported.', error)
           }
         }
+        // The compaction payback reads only `compaction/summary` and the next
+        // settled step, so it needs nothing from the core beyond the registry.
+        try {
+          const dispose = registry.register(compactionDefinition)
+          ctx.effect(() => dispose)
+        } catch (error) {
+          console.warn('[dsh-cache-miss] failed to register the compaction payback node; compaction tickets stay hidden.', error)
+        }
+        // The recommendation reads settled steps only, and shares the registry.
+        try {
+          const dispose = registry.register(adviceDefinition)
+          ctx.effect(() => dispose)
+        } catch (error) {
+          console.warn('[dsh-cache-miss] failed to register the compaction advice node; recommendations stay hidden.', error)
+        }
       })
+    }
+    if (!adviceSlotRegistered) {
+      adviceSlotRegistered = true
+      ctx.effect(() => ctx.slots.register({
+        name: 'conversation.chat.node',
+        key: 'compact-advice',
+      }, AdviceLine))
+    }
+    if (!compactionSlotRegistered) {
+      compactionSlotRegistered = true
+      ctx.effect(() => ctx.slots.register({
+        name: 'conversation.chat.node',
+        key: 'compaction-cost',
+      }, CompactionLine))
     }
     return ctx.slots.register({
       name: 'conversation.chat.node',

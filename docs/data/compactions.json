@@ -1,0 +1,268 @@
+{
+  "schema": 1,
+  "what": "Every /compact found in DSH session logs, reduced to the token counts the payback formula needs.",
+  "source": "DSH session logs (~/.dsh/sessions), all sessions containing a compaction",
+  "filters": {
+    "count": "compaction/summary events deduped by compactionId (a session writes more than one log file)",
+    "usable": "a settled assistant step on both sides of it, with A > B",
+    "priced": "the summarization model resolves to a unit price in src/client/prices.gen.ts"
+  },
+  "counts": {
+    "events": 57,
+    "unique": 27,
+    "usable": 27,
+    "priced": 22
+  },
+  "stats": {
+    "retention": {
+      "note": "prompt tokens a compaction kept (B) — an absolute size, not a fraction of A",
+      "n": 27,
+      "median": 79169,
+      "low": 21807,
+      "high": 100285
+    },
+    "summaryInput": {
+      "note": "total prompt tokens the summarization call billed, over A — below 1 means it read less than the conversation held",
+      "n": 27,
+      "median": 0.765
+    },
+    "summaryHit": {
+      "note": "share of summarization calls that re-billed less than half of A",
+      "hits": 14,
+      "n": 27,
+      "rate": 0.5185,
+      "ci95": [
+        0.34,
+        0.693
+      ]
+    },
+    "payback": {
+      "note": "break-even model calls after the compaction, priced compactions only",
+      "n": 22,
+      "min": 4,
+      "max": 94
+    }
+  },
+  "rows": [
+    {
+      "A": 731651,
+      "B": 30086,
+      "S": 3726,
+      "U": 24966,
+      "Mc": 381,
+      "model": "deepseek/deepseek-v4-flash",
+      "provider": "commandcode",
+      "N": 4
+    },
+    {
+      "A": 723634,
+      "B": 22404,
+      "S": 3133,
+      "U": 12292,
+      "Mc": 568472,
+      "model": "deepseek-v4-flash",
+      "provider": "opencode-go",
+      "N": 43
+    },
+    {
+      "A": 628960,
+      "B": 21807,
+      "S": 4282,
+      "U": 21807,
+      "Mc": 474,
+      "model": "deepseek-flash",
+      "provider": "deepseek-account",
+      "N": 5
+    },
+    {
+      "A": 606507,
+      "B": 68789,
+      "S": 5569,
+      "U": 67765,
+      "Mc": 464146,
+      "model": "deepseek-flash",
+      "provider": "deepseek-official",
+      "N": 52
+    },
+    {
+      "A": 589175,
+      "B": 99743,
+      "S": 4041,
+      "U": 82975,
+      "Mc": 341099,
+      "model": "deepseek-v4-flash",
+      "provider": "deepseek-official",
+      "N": 46
+    },
+    {
+      "A": 482331,
+      "B": 30972,
+      "S": 2745,
+      "U": 30972,
+      "Mc": 405,
+      "model": "deepseek-v4-flash",
+      "provider": "opencode-go",
+      "N": 6
+    },
+    {
+      "A": 383259,
+      "B": 97209,
+      "S": 5812,
+      "U": 80057,
+      "Mc": 246108,
+      "model": "deepseek-v4-flash",
+      "provider": "deepseek-official",
+      "N": 62
+    },
+    {
+      "A": 349523,
+      "B": 22443,
+      "S": 3347,
+      "U": 11051,
+      "Mc": 461,
+      "model": "deepseek-v4-flash",
+      "provider": "opencode-go",
+      "N": 5
+    },
+    {
+      "A": 283099,
+      "B": 96910,
+      "S": 2921,
+      "U": 81806,
+      "Mc": 183113,
+      "model": "deepseek-v4-flash",
+      "provider": "deepseek-official",
+      "N": 75
+    },
+    {
+      "A": 245065,
+      "B": 97103,
+      "S": 2769,
+      "U": 94799,
+      "Mc": 171529,
+      "model": "deepseek-v4-flash",
+      "provider": "opencode-go",
+      "N": 94
+    },
+    {
+      "A": 240118,
+      "B": 91912,
+      "S": 2751,
+      "U": 69384,
+      "Mc": 19,
+      "model": "deepseek-v4-flash",
+      "provider": "deepseek-official",
+      "N": 29
+    },
+    {
+      "A": 239950,
+      "B": 84378,
+      "S": 3440,
+      "U": 69402,
+      "Mc": 183504,
+      "model": "deepseek-v4-flash",
+      "provider": "deepseek-official",
+      "N": 86
+    },
+    {
+      "A": 239922,
+      "B": 94642,
+      "S": 6384,
+      "U": 80946,
+      "Mc": 165591,
+      "model": "deepseek-v4-flash",
+      "provider": "deepseek-official",
+      "N": 94
+    },
+    {
+      "A": 239817,
+      "B": 97934,
+      "S": 8177,
+      "U": 75406,
+      "Mc": 467,
+      "model": "deepseek-v4-flash",
+      "provider": "deepseek-official",
+      "N": 40
+    },
+    {
+      "A": 238949,
+      "B": 96963,
+      "S": 6970,
+      "U": 80323,
+      "Mc": 6243,
+      "model": "deepseek-v4-flash",
+      "provider": "deepseek-official",
+      "N": 42
+    },
+    {
+      "A": 233980,
+      "B": 29353,
+      "S": 2694,
+      "U": 23209,
+      "Mc": 221430,
+      "model": "deepseek-flash",
+      "provider": "deepseek-account",
+      "N": 63
+    },
+    {
+      "A": 215869,
+      "B": 34036,
+      "S": 3791,
+      "U": 21108,
+      "Mc": 132535,
+      "model": "deepseek-flash",
+      "provider": "deepseek-account",
+      "N": 47
+    },
+    {
+      "A": 213013,
+      "B": 23180,
+      "S": 4670,
+      "U": 22412,
+      "Mc": 213135,
+      "model": "deepseek-v4-flash",
+      "provider": "opencode-go",
+      "N": 67
+    },
+    {
+      "A": 209789,
+      "B": 72661,
+      "S": 3078,
+      "U": 57045,
+      "Mc": 452,
+      "model": "deepseek-v4-flash",
+      "provider": "teamorouter",
+      "N": 27
+    },
+    {
+      "A": 209350,
+      "B": 89069,
+      "S": 4439,
+      "U": 72045,
+      "Mc": 6209,
+      "model": "deepseek-v4-flash",
+      "provider": "teamorouter",
+      "N": 42
+    },
+    {
+      "A": 208015,
+      "B": 100285,
+      "S": 6708,
+      "U": 77501,
+      "Mc": 6195,
+      "model": "deepseek-v4-flash",
+      "provider": "teamorouter",
+      "N": 53
+    },
+    {
+      "A": 115130,
+      "B": 31031,
+      "S": 2269,
+      "U": 5154,
+      "Mc": 2021,
+      "model": "deepseek-v4-flash",
+      "provider": "teamorouter",
+      "N": 11
+    }
+  ]
+}
