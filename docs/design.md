@@ -111,20 +111,43 @@ DeepSeek 按前缀命中缓存:系统提示或**工具目录**任一处变了,�
   分得清 system 与 tools;
 - Definition `cache-miss-prefix`:只 `match` `request/header`,用 `reader.previous(...)` 取上一个
   请求快照与上一步的系统提示,调上面的 inspector;`change.kind` 直接写进模块级 map
-  (键 `turn:step`,上限 500 条),渲染层按自己的 `turn`/`step` 取用,拼成 `(~tools)` 这类段。
+  (键 `turn:step`,上限 500 条),渲染层按自己的 `turn`/`step` 取用,拼成 `(tools changed)` 这类段。
   同时用 inspector 返回的规范化 `config` 与上一份做等值比较(递归排序键后再比 JSON),
   变了就在标签里补 `config`——核心的分类不覆盖这一项,而 provider 切换(实测
   `deepseek-official` ↔ `deepseek-account`)会直接换掉缓存命名空间,整段 prompt 重算。
   比较的仍然是同一份 inspector 结果,没有引入新的核心结构。
+- Definition `cache-miss-tools`:只 `match` `developer/message` 且 `source.kind === 'tool-registry'`,
+  在同一个 map 上给那一步打一个"引擎已经说过"的标记。它不发布节点,也不改行文——它的唯一用途
+  是下面那条"别重复"的规则。
 
-为什么不做工具级 diff:那需要自己按 name + `description`/`parameters` 比较两份工具 schema,
-等于把插件绑死在核心的 `ToolSchema` 形状和 inspector 的返回结构上。核心一改,插件就炸;
-而"到底是 tools 变了还是 system 变了"这个信息核心本来就已经算好、稳定、且足够解释一次 miss。
-少借一点核心内部结构,就少一个会崩的地方。
+## 工具目录动了哪个工具
+
+工具目录变化是最可操作的一类原因,但**名字大多已经在屏幕上**:9 月 23 日之后的核会在目录成员
+变化时补一条 `developer/message`(`tool-registry`),聊天界面把它渲染成 "Tool added: …" 一行。
+所以插件按"**只说别处没有的**"决定要不要写名字:
+
+| 情况 | 别处有提示吗 | 行里写什么 |
+| --- | --- | --- |
+| 成员增删,现代核 | 有(那行) | `(tools changed)` |
+| 成员增删,但该步没有那行(旧核、窗口外) | 没有 | `(tools changed: +preset_ops)` |
+| 同名换定义(`~edit`) | 任何地方都没有 | `(tools changed: ~edit)` |
+
+前两行还叠一个显示刻度:`TOOL_MOVE_LATCH = 2`——同一轮 miss 到第 2 次时,即使那行已经在,也把
+名字写出来(那时是在记账,不是在介绍)。这个刻度只是**显示阈值**,和"算不算 diff"无关。
+
+判定本身分两档,便宜的先做:先比名字集合(只读 `name`,不碰 `description`/`parameters`),
+名字有增删就到此为止;只有名字集合相同、而目录 JSON 不同时,才逐项 `JSON.stringify` 找出
+`~name`。全量实测(145 份日志、15,580 次请求)里后者只发生 9–10 次,所以常见路径不序列化任何
+schema 正文。一次同时改名又改定义的转换只报成员变化——目录已经动了,不需要再把幸存工具全序列化。
+
+名字超过 2 个时行里只留计数(`+8 -1`),完整清单进 console 那行(和整行文字一起),因为一次 MCP
+或插件整包上下能挪十几个工具。
 
 已知边界:map 以 `turn:step` 为键,同页打开两个**不同会话**且轮号撞车时,这段文字可能张冠李戴
 (极低概率,只影响这一个词);旧核心上若没有这两个 inspector,插件自动不注册对应 Definition,
-行里没有这一段——其余功能不受影响。
+行里没有这一段——其余功能不受影响。工具名这条线另外两条:`TOOL_MOVE_LATCH` 的计数只来自已加载
+窗口,窗口被裁时少算,结果是**仍然显示名字**(宁可多说);一次同时改名又改定义的转换只报成员变化
+(见上)。旧核没有 `tool-registry` 消息,所有成员变化都会写名字——那时它确实别处看不到。
 ## 计价口径
 
 价格取自 [models.dev](https://models.dev/api.json) 的 `deepseek` provider。随包提交的
@@ -244,6 +267,12 @@ localStorage.removeItem('dsh-cache-miss:debug'); location.reload()
 客户端入口声明:核心 `0.1.5` 起宿主内置的是 `@deepseek-ai/dsh-client-modules`
 (`dsh-client-runtime` 在 npm 上止于 `0.1.1-rc.2`,已不再随宿主发布),因此
 `dsh.client.inject` 与 peer 都指向 `dsh-client-modules`。
+
+peer 下限是 `0.1.7-rc.2`,不是工具名功能出现之前的 `0.1.0-rc.6`:工具目录成员变化时那条
+`developer/message`(`tool-registry`)是 9 月 23 日进主干、随 `0.1.7-rc.2`(9 月 24 日)首次
+发布;`inspectRequestPrompt` 也在同一版。更老的核心上插件仍然能跑——只是"引擎已经说过"这个标记
+永远不出现,于是成员变化一律写名字(这正是旧核该有的样子,已用 8 月的会话日志验过)。把下限抬起
+来是在说"我们测过并保证的是这一版起",不是"更老的一定炸"。
 
 类型取自官方 `@deepseek-ai/*` 0.2.1 系列 SDK(devDependencies):Definition 契约来自
 `dsh-client-ui-conversation`,`ChatConversationViewNode` / `ChatNodeDataMap` / 座位

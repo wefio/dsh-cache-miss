@@ -1,6 +1,6 @@
 {
   "name": "dsh-cache-miss",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "DSH web plugin: one yellow line under an assistant reply whose request rebuilt the prompt cache — idle gap, re-billed tokens, what changed in the prefix, approximate USD cost from the models.dev price list, and TTFT, placed where the miss actually happened.",
   "type": "module",
   "private": false,
@@ -54,12 +54,12 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
-    "@deepseek-ai/dsh-client-modules": ">=0.1.0-rc.6 <0.3.0-0",
-    "@deepseek-ai/dsh-client-ui-chat": ">=0.1.0-rc.6 <0.3.0-0",
-    "@deepseek-ai/dsh-client-ui-conversation": ">=0.1.0-rc.6 <0.3.0-0",
-    "@deepseek-ai/dsh-client-ui-renderer": ">=0.1.0-rc.6 <0.3.0-0",
-    "@deepseek-ai/dsh-client-ui-slots": ">=0.1.0-rc.6 <0.3.0-0",
-    "@deepseek-ai/dsh-invariants": ">=0.1.0-rc.6 <0.3.0-0",
+    "@deepseek-ai/dsh-client-modules": ">=0.1.7-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-client-ui-chat": ">=0.1.7-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-client-ui-conversation": ">=0.1.7-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-client-ui-renderer": ">=0.1.7-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-client-ui-slots": ">=0.1.7-rc.2 <0.3.0-0",
+    "@deepseek-ai/dsh-invariants": ">=0.1.7-rc.2 <0.3.0-0",
     "react": "^18.0.0"
   },
   "devDependencies": {

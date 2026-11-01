@@ -12,6 +12,34 @@ export function asCacheUsage(usage: UsageLike | undefined): CacheUsage | undefin
   }
 }
 
+/**
+ * Misses one Turn recorded before `step`, read from the loaded window.
+ *
+ * The notice names a tool catalog change again only once its Turn has missed more
+ * than once, so that count has to be derived from the conversation rather than
+ * remembered across renders: a node that re-renders after a reload must reach the
+ * same decision. Steps that lie outside the loaded window cannot be counted, so a
+ * cropped window under-counts — and under-counting keeps the names on the line,
+ * which is the informative direction.
+ *
+ * @param nodes - loaded Conversation nodes, structurally.
+ * @param turn - Turn whose earlier misses to count.
+ * @param step - Step being rendered; its own miss is not counted here.
+ */
+export function turnMissesBefore(nodes: unknown, turn: number, step: number): number {
+  if (!Array.isArray(nodes)) return 0
+  let misses = 0
+  for (const node of nodes) {
+    if (node === null || typeof node !== 'object') continue
+    const record = node as { kind?: unknown; turn?: unknown; step?: unknown; usage?: unknown }
+    if (record.kind !== 'assistant' || record.turn !== turn) continue
+    if (typeof record.step !== 'number' || record.step >= step) continue
+    if (record.usage === null || typeof record.usage !== 'object') continue
+    if (isCacheMiss(asCacheUsage(record.usage as UsageLike))) misses += 1
+  }
+  return misses
+}
+
 /** Loaded-window totals the line reports after its own amount. */
 export interface LineTotals {
   /** Prompt cost of the whole Turn, over the loaded window. */
