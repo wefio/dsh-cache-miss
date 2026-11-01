@@ -20,6 +20,8 @@ dsh plugin --profile web add dsh-cache-miss
 
 Restart `dsh web` (or hard-refresh the running GUI) to load the client bundle. Like any plugin, installing or removing it moves the prefix, so avoid doing it inside a long-running session.
 
+Requires core `0.1.7-rc.2` or newer — the "Tool added" notice for a catalog change first shipped in that release. Older cores still get the yellow line; it simply names the tools every time, instead of letting that notice save the words.
+
 ## The yellow line
 
 An agent Turn runs `assistant -> tool -> assistant -> tool ...`. The Turn's **first** model call is the moment the provider's prompt cache may have expired and needs a full re-prefill (cache rebuild); later calls in the same Turn usually hit the cache it just rebuilt. DSH's own token stats sit under the composer and the produced-files row sits at the Turn tail — neither can tell you what happened at the place the miss actually occurred.
@@ -34,6 +36,7 @@ Cache miss after 3m idle · 182k tokens re-billed (turn ~$0.027) · 0.8k cached 
 - `(turn ~$…)` / `(step ~$…)` — roughly what the rebuilt part cost: a miss on the Turn's first request rebuilt the whole context (`turn`), a mid-Turn miss only the prefix it changed (`step`); when both happened the line gives their sum.
 - `ttft` — first-token latency, with an arrow hinting that a rebuild usually ran slower.
 - `(system prompt changed)` / `(tools changed)` / `(config changed)` — the core's **prefix change classification**, in words. The system prompt, the tool catalog and the request config are all part of the prefix; change any one and everything after it is re-billed. The classification comes from the core; `config changed` is the plugin's own addition, compared over the same canonical config.
+- `(tools changed: +preset_ops)` — which tool moved. Names appear **only where nothing else shows them**: the core logs its own tool-registry message when a catalog's membership changes, and the chat renders that as a "Tool added: …" row, so the line does not repeat it; a schema rewritten under an unchanged name (`~edit`) has no such row and is always named. More than two names collapse to counts (`+8 -1`); the console carries the full list.
 - `session used (~$…)` — the session's running total; `used` marks it as cumulative rather than this request.
 
 The same line goes to the browser console with a local timestamp, once per Step. `~` marks an estimate; amounts are in USD as the catalog publishes them, with no exchange-rate conversion.
@@ -56,7 +59,7 @@ The same line goes to the browser console with a local timestamp, once per Step.
 
 Re-billing 448k tokens costs ~$0.067 on flash; the same prompt read from cache costs ~$0.0013. **Prompt cost is decided by the hit rate**, and the hit rate is decided by the prefix: DeepSeek's prefix cache requires a byte-for-byte match from the very first token, so a change to the system prompt, the tool catalog or the request config re-bills everything after the change.
 
-In practice a real miss almost always comes from a prefix change rather than from cache expiry — a Turn after 27 idle minutes still hit.
+Measured over 145 session logs, 15,580 requests and 568 misses, the re-billed amount splits roughly like this: prefix changes (tool catalog or config) 41%, idle expiry at a Turn head 17%, compaction rewriting history 10%, the system prompt 8%, and 22% with no cause visible in the log at all (tools, config, system prompt and compaction all unchanged, median gap 9 seconds) — that part is server-side, where the client has no evidence.
 
 So there are only four places to save money:
 

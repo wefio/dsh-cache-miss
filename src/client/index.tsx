@@ -10,9 +10,13 @@ import {
   type LineStatus,
 } from './logic'
 import { ensurePriceModel, loadedPrefillTotals, prefillCost, resolveModelPrice } from './prices'
-import { lineCost } from './line-cost'
+import { lineCost, turnMissesBefore } from './line-cost'
 import { noteModel, refreshIfStale, subscribePrices } from './prices-live'
-import { createPrefixDefinition, createSystemPromptDefinition, readPrefixChange, type PromptInspector, type SystemInspector } from './prefix-node'
+import { formatToolMove, toolMoveDetail } from './prefix'
+import {
+  createPrefixDefinition, createSystemPromptDefinition, createToolRegistryDefinition, readStepPrefix,
+  type PromptInspector, type SystemInspector,
+} from './prefix-node'
 
 /** Yellow cache-miss single line rendered under the turn's first assistant. */
 const LINE_STYLE = {
@@ -351,7 +355,20 @@ function CacheMissLine(props: CacheMissLineProps): React.ReactElement | null {
     : lineCost(data.turn, data.step, price, stepCost, totals, loadedNodes)
   // What the request changed in the prompt prefix (the usual cause of a miss);
   // classified by the core, recorded by the header Definitions, keyed by `turn:step`.
-  const prefixChange = data === undefined ? undefined : readPrefixChange(data.turn, data.step)
+  // Tool names are attached only where no other surface already shows them: a
+  // catalog whose membership moved has the core's own tool-registry row on screen,
+  // while a schema rewritten under an unchanged name has nothing.
+  const stepPrefix = data === undefined ? undefined : readStepPrefix(data.turn, data.step)
+  const move = stepPrefix?.move
+  const moveDetail = data === undefined
+    ? undefined
+    : toolMoveDetail(move, {
+      turnMisses: 1 + turnMissesBefore(loadedNodes, data.turn, data.step),
+      announced: stepPrefix?.announced === true,
+    })
+  const prefixChange = stepPrefix?.change === undefined
+    ? undefined
+    : moveDetail === undefined ? stepPrefix.change : { ...stepPrefix.change, tools: moveDetail }
   const decided: LineStatus = data === undefined ? { kind: 'hidden' } : getLineStatus({
     usage: data.usage,
     idleMs: timing.idleMs,
@@ -419,7 +436,11 @@ function CacheMissLine(props: CacheMissLineProps): React.ReactElement | null {
       if (!logged.has(lineKey)) {
         logged.add(lineKey)
         const missTime = typeof data.missTime === 'number' ? data.missTime : Date.now()
-        console.info(`[dsh-cache-miss] ${formatLocalTime(missTime)} turn ${data.turn} step ${data.step}: ${status.line}`)
+        // The line caps itself at two named tools; the console record carries the
+        // whole catalog move so a postmortem does not depend on the screen.
+        const fullMove = formatToolMove(move)
+        const toolRecord = fullMove === undefined ? '' : ` · tools ${fullMove}`
+        console.info(`[dsh-cache-miss] ${formatLocalTime(missTime)} turn ${data.turn} step ${data.step}: ${status.line}${toolRecord}`)
       }
     }
     return createElement('div', {
@@ -527,7 +548,7 @@ function registerCacheMissDefinition(
 /** Build marker written to `<html>` while debug mode is on, so a page can prove
  * which bundle it is running: the client bundle loads only on page load, and a
  * stale one otherwise looks identical to the current one. */
-const DEBUG_BUILD_TAG = 'release-0.2'
+const DEBUG_BUILD_TAG = 'release-0.2.1'
 
 /** Register the cache-miss Definition (best-effort) and its keyed chat-node renderer. */
 export function apply(ctx: Context): void {
@@ -574,6 +595,15 @@ export function apply(ctx: Context): void {
           } catch (error) {
             console.warn('[dsh-cache-miss] failed to register the request-prefix tracker; prefix changes stay unreported.', error)
           }
+        }
+        // The core's own tool-registry message, read only to know that the chat
+        // already shows a catalog change for that Step. Independent of the prompt
+        // inspection, so it is registered unconditionally.
+        try {
+          const dispose = registry.register(createToolRegistryDefinition())
+          ctx.effect(() => dispose)
+        } catch (error) {
+          console.warn('[dsh-cache-miss] failed to register the tool-registry tracker; catalog names may repeat the chat row.', error)
         }
       })
     }

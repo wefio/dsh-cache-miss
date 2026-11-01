@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { lineCost } from '../src/client/line-cost'
+import { lineCost, turnMissesBefore } from '../src/client/line-cost'
 import { prefillCost } from '../src/client/prices'
 
 const PRICE = { input: 0.15, cacheRead: 0.003, output: 0.6 }
@@ -42,5 +42,23 @@ describe('lineCost', () => {
     const stepCost = prefillCost(PRICE, miss(22_000))
     expect(lineCost(1, 1, undefined, stepCost, undefined, [])).toBeUndefined()
     expect(lineCost(1, 1, PRICE, undefined, undefined, [])).toBeUndefined()
+  })
+})
+
+describe('turnMissesBefore', () => {
+  it('counts the Turn’s earlier misses and stops at the rendered Step', () => {
+    const nodes = [node(56, 1, miss(448_000)), node(56, 4, miss(9_000)), node(56, 7, miss(9_000))]
+    expect(turnMissesBefore(nodes, 56, 7)).toBe(2)
+    expect(turnMissesBefore(nodes, 56, 1)).toBe(0)
+  })
+
+  it('ignores hits and other Turns', () => {
+    const nodes = [node(56, 1, hit(500_000)), node(55, 2, miss(448_000)), node(56, 3, miss(9_000))]
+    expect(turnMissesBefore(nodes, 56, 4)).toBe(1)
+  })
+
+  it('reports zero for a snapshot without nodes', () => {
+    expect(turnMissesBefore(undefined, 1, 2)).toBe(0)
+    expect(turnMissesBefore([{ kind: 'cache-miss' }], 1, 2)).toBe(0)
   })
 })
