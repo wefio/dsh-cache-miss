@@ -3,6 +3,7 @@
 ![npm](https://img.shields.io/npm/dm/dsh-cache-miss)
 [![dsh.so risk](https://www.dsh.so/badge/dsh-cache-miss.svg)](https://www.dsh.so/artifact/dsh-cache-miss/)
 [![dshbase 实测可装](https://dshbase.com/badges/dsh-cache-miss.svg)](https://dshbase.com/zh/plugins/dsh-cache-miss/)
+[![DSH Insights health](https://dsh-insights.com/badge/wefio/dsh-cache-miss.svg)](https://dsh-insights.com/p/wefio/dsh-cache-miss/?utm_source=badge&utm_medium=readme&utm_campaign=wefio/dsh-cache-miss)
 
 [English](README.en.md)
 
